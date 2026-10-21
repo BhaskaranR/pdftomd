@@ -1,0 +1,1034 @@
+{
+  "success": true,
+  "data": {
+    "metadata": {
+      "sourceFile": "report.pdf",
+      "title": "Acme Annual Report",
+      "numPages": 4,
+      "totalPages": 4,
+      "pdfType": "TextBased",
+      "confidence": 1.0,
+      "pagesNeedingOcr": [],
+      "processingTimeMs": 237.7
+    },
+    "markdown": "# Acme Annual Report\n\n## Executive Summary\n\nThis year Acme grew **revenue by 42%** and launched three new products. Details are in the *financial overview* below. Visit [our website](https://example.com/report) for more. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\n### Key Highlights\n\n- Opened 12 new regional offices.\n- Customer retention improved to 91% across all segments, the highest level in the company's history.\n- Launched the mobile rewards app.\n\n### Priorities for next year\n\n1. Expand into two new markets.\n2. Reduce churn below 5%.\n3. Ship the partner API.\n\n## Financial Overview\n\nQuarterly results are summarised in the table below.\n\n| Quarter | Revenue ($M) | Growth | Margin |\n| --- | --- | --- | --- |\n| Q1 | 12.4 | 8% | 21% |\n| Q2 | 14.1 | 14% | 23% |\n| Q3 | 15.9 | 13% | 24% |\n| Q4 | 18.2 | 15% | 26% |\n\nRevenue by region (chart):\n\nFigure 1. Revenue by region.\n\n## Regional Breakdown\n\nThe borderless table below lists regional performance.\n\n| Region | Stores | Revenue | Change |\n| --- | --- | --- | --- |\n| North | 42 | $18.1M | +12% |\n| South | 35 | $14.7M | +9% |\n| East | 28 | $11.2M | -3% |\n| West | 51 | $22.9M | +18% |\n\n## Integration Example\n\nMerchants can award points with a single API call:\n\n```\nimport requests\ndef award(customer_id, points):\n    return requests.post(\"/v1/points\",\n        json={\"customer\": customer_id, \"points\": points})\n```\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\n## Market Analysis\n\nColumn paragraph 1. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 2. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 3. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 4. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 5. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 6. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 7. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 8. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 9. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 10. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n",
+    "pages": [
+      {
+        "pageNumber": 1,
+        "markdown": "# Acme Annual Report\n\n## Executive Summary\n\nThis year Acme grew **revenue by 42%** and launched three new products. Details are in the *financial overview* below. Visit [our website](https://example.com/report) for more. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\n### Key Highlights\n\n- Opened 12 new regional offices.\n- Customer retention improved to 91% across all segments, the highest level in the company's history.\n- Launched the mobile rewards app.\n\n### Priorities for next year\n\n1. Expand into two new markets.\n2. Reduce churn below 5%.\n3. Ship the partner API.\n\n## Financial Overview\n\nQuarterly results are summarised in the table below.\n\n| Quarter | Revenue ($M) | Growth | Margin |\n| --- | --- | --- | --- |\n| Q1 | 12.4 | 8% | 21% |\n| Q2 | 14.1 | 14% | 23% |\n| Q3 | 15.9 | 13% | 24% |\n| Q4 | 18.2 | 15% | 26% |\n\nRevenue by region (chart):"
+      },
+      {
+        "pageNumber": 2,
+        "markdown": "Figure 1. Revenue by region."
+      },
+      {
+        "pageNumber": 3,
+        "markdown": "## Regional Breakdown\n\nThe borderless table below lists regional performance.\n\n| Region | Stores | Revenue | Change |\n| --- | --- | --- | --- |\n| North | 42 | $18.1M | +12% |\n| South | 35 | $14.7M | +9% |\n| East | 28 | $11.2M | -3% |\n| West | 51 | $22.9M | +18% |\n\n## Integration Example\n\nMerchants can award points with a single API call:\n\n```\nimport requests\ndef award(customer_id, points):\n    return requests.post(\"/v1/points\",\n        json={\"customer\": customer_id, \"points\": points})\n```\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nLoyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out."
+      },
+      {
+        "pageNumber": 4,
+        "markdown": "## Market Analysis\n\nColumn paragraph 1. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 2. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 3. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 4. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 5. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 6. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 7. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 8. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 9. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.\n\nColumn paragraph 10. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out."
+      }
+    ],
+    "blocks": [
+      {
+        "pageNumber": 1,
+        "width": 612,
+        "height": 792,
+        "status": "ok",
+        "items": [
+          {
+            "id": "p1.b0",
+            "type": "page_header",
+            "label": "page_header",
+            "bbox": [
+              0.1176,
+              0.0374,
+              0.3196,
+              0.0475
+            ],
+            "content": "Acme Corp — Annual Report 2026",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 0
+          },
+          {
+            "id": "p1.b1",
+            "type": "title",
+            "label": "title",
+            "bbox": [
+              0.3061,
+              0.1048,
+              0.6939,
+              0.1351
+            ],
+            "content": "# Acme Annual Report",
+            "markdownSpan": [
+              0,
+              20
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 1
+          },
+          {
+            "id": "p1.b2",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.1532,
+              0.3759,
+              0.1734
+            ],
+            "content": "## Executive Summary",
+            "markdownSpan": [
+              22,
+              42
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 2
+          },
+          {
+            "id": "p1.b3",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.1847,
+              0.8674,
+              0.2661
+            ],
+            "content": "This year Acme grew **revenue by 42%** and launched three new products. Details are in the *financial overview* below. Visit [our website](https://example.com/report) for more. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              44,
+              560
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 3
+          },
+          {
+            "id": "p1.b4",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.28,
+              0.8725,
+              0.3444
+            ],
+            "content": "Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              562,
+              901
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 4
+          },
+          {
+            "id": "p1.b5",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.3614,
+              0.2762,
+              0.3778
+            ],
+            "content": "### Key Highlights",
+            "markdownSpan": [
+              903,
+              921
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 5
+          },
+          {
+            "id": "p1.b6",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.3861,
+              0.3803,
+              0.4015
+            ],
+            "content": "- Opened 12 new regional offices.",
+            "markdownSpan": [
+              923,
+              956
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 6
+          },
+          {
+            "id": "p1.b7",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.4132,
+              0.8462,
+              0.4286
+            ],
+            "content": "- Customer retention improved to 91% across all segments, the highest level in the company's history.",
+            "markdownSpan": [
+              957,
+              1058
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 7
+          },
+          {
+            "id": "p1.b8",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.4404,
+              0.3937,
+              0.4558
+            ],
+            "content": "- Launched the mobile rewards app.",
+            "markdownSpan": [
+              1059,
+              1093
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 8
+          },
+          {
+            "id": "p1.b9",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.4706,
+              0.3529,
+              0.487
+            ],
+            "content": "### Priorities for next year",
+            "markdownSpan": [
+              1095,
+              1123
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 9
+          },
+          {
+            "id": "p1.b10",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.4953,
+              0.3661,
+              0.5107
+            ],
+            "content": "1. Expand into two new markets.",
+            "markdownSpan": [
+              1125,
+              1156
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 10
+          },
+          {
+            "id": "p1.b11",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.5224,
+              0.3293,
+              0.5379
+            ],
+            "content": "2. Reduce churn below 5%.",
+            "markdownSpan": [
+              1157,
+              1182
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 11
+          },
+          {
+            "id": "p1.b12",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.5496,
+              0.3027,
+              0.565
+            ],
+            "content": "3. Ship the partner API.",
+            "markdownSpan": [
+              1183,
+              1207
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 12
+          },
+          {
+            "id": "p1.b13",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.5831,
+              0.3643,
+              0.6033
+            ],
+            "content": "## Financial Overview",
+            "markdownSpan": [
+              1209,
+              1230
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 13
+          },
+          {
+            "id": "p1.b14",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.6146,
+              0.4858,
+              0.6279
+            ],
+            "content": "Quarterly results are summarised in the table below.",
+            "markdownSpan": [
+              1232,
+              1284
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 14
+          },
+          {
+            "id": "p1.b15",
+            "type": "table",
+            "label": "table",
+            "bbox": [
+              0.3366,
+              0.6389,
+              0.6634,
+              0.7525
+            ],
+            "content": "| Quarter | Revenue ($M) | Growth | Margin |\n| --- | --- | --- | --- |\n| Q1 | 12.4 | 8% | 21% |\n| Q2 | 14.1 | 14% | 23% |\n| Q3 | 15.9 | 13% | 24% |\n| Q4 | 18.2 | 15% | 26% |",
+            "markdownSpan": [
+              1286,
+              1459
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 15
+          },
+          {
+            "id": "p1.b16",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.7706,
+              0.3118,
+              0.7838
+            ],
+            "content": "Revenue by region (chart):",
+            "markdownSpan": [
+              1461,
+              1487
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 16
+          },
+          {
+            "id": "p1.b17",
+            "type": "page_number",
+            "label": "page_number",
+            "bbox": [
+              0.8409,
+              0.9465,
+              0.8824,
+              0.9566
+            ],
+            "content": "Page 1",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 17
+          }
+        ]
+      },
+      {
+        "pageNumber": 2,
+        "width": 612,
+        "height": 792,
+        "status": "ok",
+        "items": [
+          {
+            "id": "p2.b0",
+            "type": "page_header",
+            "label": "page_header",
+            "bbox": [
+              0.1176,
+              0.0374,
+              0.3196,
+              0.0475
+            ],
+            "content": "Acme Corp — Annual Report 2026",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 0
+          },
+          {
+            "id": "p2.b1",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.2832,
+              0.3276,
+              0.2964
+            ],
+            "content": "Figure 1. Revenue by region.",
+            "markdownSpan": [
+              1489,
+              1517
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 1
+          },
+          {
+            "id": "p2.b2",
+            "type": "page_number",
+            "label": "page_number",
+            "bbox": [
+              0.8409,
+              0.9465,
+              0.8824,
+              0.9566
+            ],
+            "content": "Page 2",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 2
+          }
+        ]
+      },
+      {
+        "pageNumber": 3,
+        "width": 612,
+        "height": 792,
+        "status": "ok",
+        "items": [
+          {
+            "id": "p3.b0",
+            "type": "page_header",
+            "label": "page_header",
+            "bbox": [
+              0.1176,
+              0.0374,
+              0.3196,
+              0.0475
+            ],
+            "content": "Acme Corp — Annual Report 2026",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 0
+          },
+          {
+            "id": "p3.b1",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.1027,
+              0.386,
+              0.1229
+            ],
+            "content": "## Regional Breakdown",
+            "markdownSpan": [
+              1519,
+              1540
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 1
+          },
+          {
+            "id": "p3.b2",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.1342,
+              0.5005,
+              0.1474
+            ],
+            "content": "The borderless table below lists regional performance.",
+            "markdownSpan": [
+              1542,
+              1596
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 2
+          },
+          {
+            "id": "p3.b3",
+            "type": "table",
+            "label": "table",
+            "bbox": [
+              0.2157,
+              0.1647,
+              0.7289,
+              0.2676
+            ],
+            "content": "| Region | Stores | Revenue | Change |\n| --- | --- | --- | --- |\n| North | 42 | $18.1M | +12% |\n| South | 35 | $14.7M | +9% |\n| East | 28 | $11.2M | -3% |\n| West | 51 | $22.9M | +18% |",
+            "markdownSpan": [
+              1598,
+              1782
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 3
+          },
+          {
+            "id": "p3.b4",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.3041,
+              0.3773,
+              0.3243
+            ],
+            "content": "## Integration Example",
+            "markdownSpan": [
+              1784,
+              1806
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 4
+          },
+          {
+            "id": "p3.b5",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.3356,
+              0.4782,
+              0.3488
+            ],
+            "content": "Merchants can award points with a single API call:",
+            "markdownSpan": [
+              1808,
+              1858
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 5
+          },
+          {
+            "id": "p3.b6",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.3621,
+              0.6304,
+              0.429
+            ],
+            "content": "```\nimport requests\ndef award(customer_id, points):\n    return requests.post(\"/v1/points\",\n        json={\"customer\": customer_id, \"points\": points})\n```",
+            "markdownSpan": [
+              1860,
+              2012
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 6
+          },
+          {
+            "id": "p3.b7",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.4448,
+              0.8725,
+              0.5092
+            ],
+            "content": "Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              2014,
+              2353
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 7
+          },
+          {
+            "id": "p3.b8",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.5231,
+              0.8725,
+              0.5875
+            ],
+            "content": "Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              2355,
+              2694
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 8
+          },
+          {
+            "id": "p3.b9",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.6014,
+              0.8725,
+              0.6658
+            ],
+            "content": "Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              2696,
+              3035
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 9
+          },
+          {
+            "id": "p3.b10",
+            "type": "page_number",
+            "label": "page_number",
+            "bbox": [
+              0.8409,
+              0.9465,
+              0.8824,
+              0.9566
+            ],
+            "content": "Page 3",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 10
+          }
+        ]
+      },
+      {
+        "pageNumber": 4,
+        "width": 612,
+        "height": 792,
+        "status": "ok",
+        "items": [
+          {
+            "id": "p4.b0",
+            "type": "page_header",
+            "label": "page_header",
+            "bbox": [
+              0.1176,
+              0.0374,
+              0.3196,
+              0.0475
+            ],
+            "content": "Acme Corp — Annual Report 2026",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 0
+          },
+          {
+            "id": "p4.b1",
+            "type": "section_header",
+            "label": "section_header",
+            "bbox": [
+              0.1275,
+              0.1027,
+              0.3265,
+              0.1229
+            ],
+            "content": "## Market Analysis",
+            "markdownSpan": [
+              3037,
+              3055
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 1
+          },
+          {
+            "id": "p4.b2",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.1342,
+              0.4725,
+              0.2668
+            ],
+            "content": "Column paragraph 1. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              3057,
+              3416
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 2
+          },
+          {
+            "id": "p4.b3",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.2807,
+              0.4725,
+              0.4132
+            ],
+            "content": "Column paragraph 2. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              3418,
+              3777
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 3
+          },
+          {
+            "id": "p4.b4",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.4271,
+              0.4725,
+              0.5597
+            ],
+            "content": "Column paragraph 3. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              3779,
+              4138
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 4
+          },
+          {
+            "id": "p4.b5",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.5736,
+              0.4725,
+              0.7062
+            ],
+            "content": "Column paragraph 4. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              4140,
+              4499
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 5
+          },
+          {
+            "id": "p4.b6",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.72,
+              0.4725,
+              0.8526
+            ],
+            "content": "Column paragraph 5. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              4501,
+              4860
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 6
+          },
+          {
+            "id": "p4.b7",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.1275,
+              0.1014,
+              0.8557,
+              0.8968
+            ],
+            "content": "Column paragraph 6. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              4862,
+              5221
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 7
+          },
+          {
+            "id": "p4.b8",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.5275,
+              0.2137,
+              0.8725,
+              0.3463
+            ],
+            "content": "Column paragraph 7. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              5223,
+              5582
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 8
+          },
+          {
+            "id": "p4.b9",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.5275,
+              0.3602,
+              0.8725,
+              0.4928
+            ],
+            "content": "Column paragraph 8. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              5584,
+              5943
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 9
+          },
+          {
+            "id": "p4.b10",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.5275,
+              0.5067,
+              0.8725,
+              0.6392
+            ],
+            "content": "Column paragraph 9. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              5945,
+              6304
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 10
+          },
+          {
+            "id": "p4.b11",
+            "type": "text",
+            "label": "text",
+            "bbox": [
+              0.5275,
+              0.6531,
+              0.8725,
+              0.7857
+            ],
+            "content": "Column paragraph 10. Loyalty programs reward repeat customers with points that can be redeemed for discounts, free items, or exclusive perks. Merchants use them to raise visit frequency and average order value, while customers enjoy tangible value for purchases they would have made anyway. Well-designed programs are simple to understand and quick to pay out.",
+            "markdownSpan": [
+              6306,
+              6666
+            ],
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 11
+          },
+          {
+            "id": "p4.b12",
+            "type": "page_number",
+            "label": "page_number",
+            "bbox": [
+              0.8409,
+              0.9465,
+              0.8824,
+              0.9566
+            ],
+            "content": "Page 4",
+            "markdownSpan": null,
+            "source": "native_text",
+            "confidence": {
+              "layout": null,
+              "ocr": null
+            },
+            "readingOrder": 12
+          }
+        ]
+      }
+    ]
+  }
+}
