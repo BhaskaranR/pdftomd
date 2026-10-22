@@ -69,8 +69,8 @@ FURNITURE_PAGE_FRACTION = 0.30
 FURNITURE_Y_STDDEV = 0.05
 MIN_IMAGE_PT = 24                   # ignore tiny images (icons, bullets, rules)
 
-BULLETS = "•●○◦▪▫■□‣⁃∙·◆◇►▸➢➤✓✔-–—*"
-BULLET_RE = re.compile(r"^\s*([•●○◦▪▫■□‣⁃∙·◆◇►▸➢➤✓✔]|[-–—*](?=\s))\s*")
+BULLETS = "•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔-–—*"
+BULLET_RE = re.compile(r"^\s*([•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔]|[-–—*](?=\s))\s*")
 NUMBERED_RE = re.compile(
     r"^\s*(\(?(\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])\s+(?=\S)", re.I)
 MONO_RE = re.compile(r"mono|courier|consol|menlo|inconsolata|code|typewriter|"
@@ -108,9 +108,10 @@ class Line:
     x1: float
     top: float
     bottom: float
-    kind: str = "text"        # text | table | image | ocr
-    payload: object = None    # table rows / image ref / ocr text
+    kind: str = "text"        # text | table | image | ocr | chart
+    payload: object = None    # table rows / image ref / ocr text / chart info
     colw: float = 0.0         # width of the column this line sits in
+    region: int = 0           # layout region (side-by-side blocks) it belongs to
 
     @property
     def text(self) -> str:
@@ -323,7 +324,7 @@ def extract_words(page, pageno) -> list:
                          upright=True, dropcap=True)
             else:
                 continue  # rotated margin stamps / axis titles
-        txt = r["text"].replace("­", "")  # soft hyphen
+        txt = r["text"].replace("\u00ad", "")  # soft hyphen
         if CID_RE.fullmatch(txt):
             txt = CID_MARK                     # unmapped glyph, maybe a bullet
         else:
@@ -417,8 +418,10 @@ def segments(line, gap_factor=1.0, min_gap=6.0) -> list:
 
 # ───────────────────────────── 3. tables ──────────────────────────────────
 
-def ruled_tables(page) -> list:
-    """Rectangle / ruling-line tables (tables/detect_rects.rs, detect_lines.rs)."""
+def ruled_tables(page, origin=None) -> list:
+    """Rectangle / ruling-line tables (tables/detect_rects.rs, detect_lines.rs).
+    `page` may be a cropped region; `origin` is the full page's origin.
+    Returns [(bbox, rows, column x-ranges)], page-relative."""
     found = []
     try:
         tables = page.find_tables(table_settings={
@@ -427,6 +430,7 @@ def ruled_tables(page) -> list:
         })
     except Exception:
         return found
+    ox, oy = origin or page_origin(page)
     for t in tables:
         rows = t.extract()
         if not rows or len(rows) < 2:
@@ -438,10 +442,52 @@ def ruled_tables(page) -> list:
         filled = sum(1 for c in cells if c and c.strip())
         if filled < 3 or filled / max(len(cells), 1) < 0.25:
             continue
-        ox, oy = page_origin(page)
         b = t.bbox
-        found.append(((b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy), rows))
+        try:
+            cols = [(c.bbox[0] - ox, c.bbox[2] - ox) for c in t.columns]
+        except Exception:
+            cols = []
+        found.append(((b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy), rows, cols))
     return found
+
+
+def table_header_above(tbox, rows, cols, words):
+    """A header row sitting just above a ruled table belongs to it: banded tables
+    often shade only the body rows, so the header falls outside the detected grid.
+    Returns (rows, header_words)."""
+    x0, top, x1, _ = tbox
+    if len(cols) < 2:
+        return rows, []
+    inside = [w for w in words if top - 16 <= w.bottom <= top + 1.5
+              and x0 - 4 <= (w.x0 + w.x1) / 2 <= x1 + 4]
+    if not inside:
+        return rows, []
+    base = max(w.bottom for w in inside)
+    line = sorted((w for w in inside if abs(w.bottom - base) <= 2), key=lambda w: w.x0)
+    # a caption or sentence that runs past the table is not a header
+    if any(abs(w.bottom - base) <= 2 and not (x0 - 4 <= (w.x0 + w.x1) / 2 <= x1 + 4)
+           for w in words):
+        return rows, []
+    text = join_words(line)
+    if CAPTION_RE.match(text) or re.search(r"\([^)]*(million|thousand|bn|%|EUR|USD|GBP)[^)]*\)", text, re.I):
+        return rows, []                     # a caption or units line, not a header
+    segs = segments(Line(0, line, line[0].x0, line[-1].x1, line[0].top, line[0].bottom))
+    if len(segs) < 2:
+        return rows, []
+    ncol = max(len(r) for r in rows)
+    header = [""] * ncol
+    for sg in segs:
+        sx0, sx1 = sg[0].x0, sg[-1].x1
+        hits = [k for k, (cx0, cx1) in enumerate(cols[:ncol]) if sx0 < cx1 - 2 and sx1 > cx0 + 2]
+        if len(hits) != 1:
+            return rows, []                 # straddles columns: not a header row
+        k = hits[0]
+        header[k] = (header[k] + " " + join_words(sg)).strip()
+    data_cols = [k for k in range(ncol) if any(k < len(r) and r[k] and r[k].strip() for r in rows)]
+    filled = sum(1 for h in header if h)
+    if filled < 2 or filled < len(data_cols) - 1:
+        return rows, []
+    return [header] + [list(r) for r in rows], line
 
 
 def column_gaps(intervals, min_gap) -> list:
@@ -481,10 +527,23 @@ def add_interval(merged, a, b, tol=6.0):
     return out
 
 
-def heuristic_tables(lines, page_width) -> list:
+def header_ruled(first, second, rules) -> bool:
+    """A rule between two rows that spans most of them: a table's header rule."""
+    lo, hi = min(first.x0, second.x0), max(first.x1, second.x1)
+    span = max(hi - lo, 1.0)
+    for rx0, rx1, ry in rules:
+        if first.top < ry <= second.top + 1:
+            if (min(rx1, hi) - max(rx0, lo)) / span >= 0.8:
+                return True
+    return False
+
+
+def heuristic_tables(lines, page_width, rules=()) -> list:
     """Text-alignment tables (tables/detect_heuristic.rs, simplified):
     ≥3 consecutive rows whose cell segments leave consistent vertical
-    gutters, with short cells (prose in two columns is rejected)."""
+    gutters, with short cells (prose in two columns is rejected). A header row
+    underlined by a rule makes a 2-row table (header + one data row) valid too.
+    `page_width` is the width of the region being scanned."""
     out = []
     seg_cache = {}
 
@@ -508,6 +567,16 @@ def heuristic_tables(lines, page_width) -> list:
                 prev = lines[j - 1]
                 if ln.top - prev.bottom > 2.2 * max(prev.size, 1):
                     break
+            # a header underlined by its own rule after a blank row starts a new table
+            if j > i + 1 and rules and j + 1 < n:
+                pitch = statistics.median(lines[k + 1].top - lines[k].top for k in range(i, j - 1))
+                blank_gap = not any(lines[j - 1].bottom < ry < ln.top for _, _, ry in rules)
+                wordy = sum(1 for w in ln.words if sum(ch.isalpha() for ch in w.text) >= 2) * 2 \
+                    >= len(ln.words)
+                if ln.top - lines[j - 1].top > 1.5 * pitch and blank_gap and wordy \
+                        and lines[j + 1].top - ln.top <= 1.5 * pitch \
+                        and header_ruled(ln, lines[j + 1], rules):
+                    break
             segs = segs_of(ln)
             if len(segs) >= 2:
                 multi += 1
@@ -519,10 +588,16 @@ def heuristic_tables(lines, page_width) -> list:
             merged = trial
             if j - i + 1 >= 3 and multi >= max(2, 0.6 * (j - i + 1)):
                 best_j, best_gaps = j, merged
+            elif j - i + 1 == 2 and multi == 2 and best_j is None and rules \
+                    and len(segs_of(lines[i])) >= 3 and len(segs_of(lines[j])) >= 3 \
+                    and header_ruled(lines[i], lines[j], rules):
+                best_j, best_gaps = j, merged
         if best_j is None:
             i += 1
             continue
         rows_lines = lines[i:best_j + 1]
+        min_rows = 2 if (len(rows_lines) == 2 and rules and len(segs_of(rows_lines[0])) >= 3
+                         and header_ruled(rows_lines[0], rows_lines[1], rules)) else 3
         # trim trailing single-segment rows (likely prose after the table)
         while len(rows_lines) > 3 and len(segs_of(rows_lines[-1])) < 2:
             rows_lines.pop()
@@ -532,12 +607,12 @@ def heuristic_tables(lines, page_width) -> list:
                                         min(l.x0 for l in rows_lines))
         firsts = [segments(l)[0] for l in rows_lines]
         markerish = sum(1 for f in firsts if len(f) == 1 and (
-            re.fullmatch(r"[•●○◦▪▫■□‣⁃∙·◆◇►▸➢➤✓✔*\-–—]|\(?\w{1,3}[.)]?", f[0].text)
+            re.fullmatch(r"[•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔*\-–—]|\(?\w{1,3}[.)]?", f[0].text)
             or f[0].text == CID_MARK))
         if markerish == len(firsts) and all(len(segments(l)) == 2 for l in rows_lines):
             i = best_j + 1
             continue  # a list with hanging indents, not a table
-        if avg_words > 6 or len(rows_lines) < 3:
+        if avg_words > 6 or len(rows_lines) < min_rows:
             i += 1
             continue
         edges = [g[0] + (g[1] - g[0]) / 2 for g in column_gaps(
@@ -618,6 +693,178 @@ def save_image(page, ref, mode, image_dir, stem, dpi):
 
 # ───────────────────────────── 5. OCR ─────────────────────────────────────
 
+# ───────────────────────────── 4b. vector graphics: rules and charts ───────
+
+CHART_DILATE = 18.0       # shapes closer than this belong to one chart
+MAX_SHAPES = 4000         # beyond this a page is a drawing/map: skip chart detection
+
+
+def color_rgb(c):
+    """pdfplumber colour (gray / RGB / CMYK, number or tuple) -> RGB tuple, or None."""
+    if c is None:
+        return None
+    if isinstance(c, (int, float)):
+        c = (c,)
+    try:
+        vals = [float(v) for v in c]
+    except (TypeError, ValueError):
+        return None                       # pattern or named colour space
+    if len(vals) == 1:
+        return (vals[0],) * 3
+    if len(vals) == 3:
+        return tuple(vals)
+    if len(vals) == 4:
+        cy, m, y, k = vals
+        return ((1 - cy) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k))
+    return None
+
+
+def whiteish(rgb) -> bool:
+    return rgb is not None and min(rgb) >= 0.92
+
+
+def horizontal_rules(page, ox, oy, min_len=20.0) -> list:
+    """Horizontal edges of stroked lines, rectangles and paths, page-relative:
+    [(x0, x1, y)]."""
+    out = []
+    for e in page.horizontal_edges:
+        x0, x1 = e["x0"] - ox, e["x1"] - ox
+        if x1 - x0 >= min_len:
+            out.append((x0, x1, e["top"] - oy))
+    return out
+
+
+class _Grid:
+    """Bucketed points for fast 'is any point inside this box' queries."""
+
+    def __init__(self, pts, cell=24.0):
+        self.cell, self.b = cell, defaultdict(list)
+        for p in pts:
+            self.b[(int(p[0] // cell), int(p[1] // cell))].append(p)
+
+    def any_in(self, x0, top, x1, bottom) -> bool:
+        c = self.cell
+        for gx in range(int(x0 // c), int(x1 // c) + 1):
+            for gy in range(int(top // c), int(bottom // c) + 1):
+                for px, py in self.b.get((gx, gy), ()):
+                    if x0 <= px <= x1 and top <= py <= bottom:
+                        return True
+        return False
+
+
+def _shape(o, ox, oy) -> dict:
+    x0, top, x1, bottom = o["x0"] - ox, o["top"] - oy, o["x1"] - ox, o["bottom"] - oy
+    rectlike = o["object_type"] == "rect"
+    curved = any(seg and seg[0] in ("c", "v", "y") for seg in (o.get("path") or []))
+    if not rectlike and not curved:     # straight-edged path whose points all sit on its box
+        pts = [(p[0] - ox, p[1] - oy) for p in (o.get("pts") or [])]
+        rectlike = len(pts) >= 4 and all(
+            min(abs(px - x0), abs(px - x1)) < 0.6 or min(abs(py - top), abs(py - bottom)) < 0.6
+            for px, py in pts)
+    fc = color_rgb(o.get("non_stroking_color"))
+    return {"x0": x0, "top": top, "x1": x1, "bottom": bottom, "fill": bool(o.get("fill")),
+            "stroke": bool(o.get("stroke")), "fc": fc, "rectlike": rectlike,
+            "ck": tuple(round(v, 2) for v in fc) if fc else (0.0, 0.0, 0.0)}
+
+
+def _bbox(items) -> tuple:
+    return (min(i["x0"] for i in items), min(i["top"] for i in items),
+            max(i["x1"] for i in items), max(i["bottom"] for i in items))
+
+
+def _union(a, b) -> tuple:
+    return (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+
+
+def _cv(vals) -> float:
+    m = statistics.mean(vals)
+    return statistics.pstdev(vals) / m if m else 0.0
+
+
+def vector_figures(page, words, ox, oy) -> list:
+    """Charts drawn with vector graphics, as boxes (page-relative) to save as
+    pictures. Reading numbers out of chart drawings isn't reliable across PDFs
+    (missed bars, axes guessed from stray numbers), so nothing is extracted and no
+    text is moved: the chart just gets an image next to its own labels."""
+    objs = page.rects + page.curves
+    if len(objs) > MAX_SHAPES:
+        return []
+    W, H = page.width, page.height
+    shapes = [_shape(o, ox, oy) for o in objs]
+    grid = _Grid([((w.x0 + w.x1) / 2, (w.top + w.bottom) / 2) for w in words])
+    marks = []
+    for s in shapes:
+        w_, h_ = s["x1"] - s["x0"], s["bottom"] - s["top"]
+        if not s["fill"] or whiteish(s["fc"]) or w_ * h_ > 0.35 * W * H:
+            continue
+        if min(w_, h_) < 2.5 or w_ * h_ < 20:
+            continue                       # rules, borders, dots
+        if grid.any_in(s["x0"], s["top"], s["x1"], s["bottom"]):
+            continue                       # text sits on it: a cell fill or highlight
+        marks.append(s)
+    if len(marks) < 3:
+        return []
+    # cluster nearby marks (bucketed; dense buckets are merged wholesale)
+    parent = list(range(len(marks)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    D = CHART_DILATE
+    buckets = defaultdict(list)
+    for i, m in enumerate(marks):
+        for gx in range(int((m["x0"] - D) // 48), int((m["x1"] + D) // 48) + 1):
+            for gy in range(int((m["top"] - D) // 48), int((m["bottom"] + D) // 48) + 1):
+                buckets[(gx, gy)].append(i)
+    for b in buckets.values():
+        if len(b) > 64:
+            for j in b[1:]:
+                parent[find(j)] = find(b[0])
+            continue
+        for p in range(len(b)):
+            for q in range(p + 1, len(b)):
+                m1, m2 = marks[b[p]], marks[b[q]]
+                if m1["x0"] - D <= m2["x1"] and m2["x0"] - D <= m1["x1"] and \
+                        m1["top"] - D <= m2["bottom"] and m2["top"] - D <= m1["bottom"]:
+                    parent[find(b[p])] = find(b[q])
+    # groups of bars spread along one axis line are one chart
+    axes = [s for s in shapes if min(s["x1"] - s["x0"], s["bottom"] - s["top"]) < 1.5
+            and max(s["x1"] - s["x0"], s["bottom"] - s["top"]) >= 30] + \
+        [{"x0": l_["x0"] - ox, "x1": l_["x1"] - ox, "top": l_["top"] - oy, "bottom": l_["bottom"] - oy}
+         for l_ in page.lines if max(l_["x1"] - l_["x0"], l_["bottom"] - l_["top"]) >= 30]
+    groups = defaultdict(list)
+    for i in range(len(marks)):
+        groups[find(i)].append(i)
+    gbox = {k: _bbox([marks[i] for i in v]) for k, v in groups.items()}
+    for a_ in axes:
+        hit = [k for k, bx in gbox.items() if a_["x0"] <= bx[2] + 6 and a_["x1"] >= bx[0] - 6
+               and a_["top"] <= bx[3] + 6 and a_["bottom"] >= bx[1] - 6]
+        for k in hit[1:]:
+            parent[find(k)] = find(hit[0])
+    clusters = defaultdict(list)
+    for i in range(len(marks)):
+        clusters[find(i)].append(marks[i])
+    figs = []
+    for ms in clusters.values():
+        if len(ms) < 3 or len({m["ck"] for m in ms}) < 2:
+            continue
+        box = _bbox(ms)
+        if (box[2] - box[0]) * (box[3] - box[1]) < 1200:
+            continue
+        if _cv([m["x1"] - m["x0"] for m in ms]) < 0.05 and _cv([m["bottom"] - m["top"] for m in ms]) < 0.05:
+            continue                       # uniform grid of coloured cells: a table, not a chart
+        # include the chart's own labels: short text lines right next to the marks
+        near = [w for w in words if box[0] - 90 <= w.x0 and w.x1 <= box[2] + 90
+                and box[1] - 20 <= w.top and w.bottom <= box[3] + 30]
+        for ln in group_lines(near, 0):
+            if len(ln.words) <= 6:
+                box = _union(box, (ln.x0, ln.top, ln.x1, ln.bottom))
+        figs.append({"bbox": box})
+    return figs
+
+
 _OCR_WARNED = False
 
 
@@ -630,7 +877,36 @@ def ocr_blocks(page, lang="eng", dpi=300) -> Optional[list]:
         img = page.to_image(resolution=dpi).original
     except Exception:
         return None
-    return ocr_image(img, lang, 72.0 / dpi)
+    k = 72.0 / dpi
+    rot = detect_rotation(img)
+    if not rot:
+        return ocr_image(img, lang, k)
+    # scanned sideways / upside down: OCR an upright copy, map positions back
+    W0, H0 = img.width * k, img.height * k
+
+    def unrotate(x, y):
+        if rot == 90:
+            return y, H0 - x
+        if rot == 180:
+            return W0 - x, H0 - y
+        return W0 - y, x                       # 270
+    return ocr_image(img.rotate(-rot, expand=True), lang, k, unrotate)
+
+
+def detect_rotation(img) -> int:
+    """Clockwise turn (0/90/180/270) that makes a page image upright, from
+    Tesseract's orientation detection. 0 when unsure or unavailable."""
+    try:
+        import pytesseract
+        small = img.copy()
+        small.thumbnail((1400, 1400))           # orientation needs far fewer pixels than OCR
+        osd = pytesseract.image_to_osd(small, output_type=pytesseract.Output.DICT)
+        rot = int(osd.get("rotate", 0))
+        if rot in (90, 180, 270) and float(osd.get("orientation_conf", 0)) >= 2.0:
+            return rot
+    except Exception:
+        pass                                    # too little text to tell, or no osd data
+    return 0
 
 
 def ocr_available() -> bool:
@@ -653,8 +929,9 @@ def flatten_alpha(img):
     return img.convert("RGB")
 
 
-def ocr_image(img, lang="eng", k=1.0) -> Optional[list]:
-    """OCR a PIL image; bboxes are scaled by k (pixels -> points for pages)."""
+def ocr_image(img, lang="eng", k=1.0, unrotate=None) -> Optional[list]:
+    """OCR a PIL image; bboxes are scaled by k (pixels -> points for pages) and,
+    for a page OCR'd upright from a rotated scan, mapped back by `unrotate`."""
     global _OCR_WARNED
     try:
         import pytesseract
@@ -701,20 +978,170 @@ def ocr_image(img, lang="eng", k=1.0) -> Optional[list]:
                         "bbox": (min(l["box"][0] for l in g), min(l["box"][1] for l in g),
                                  max(l["box"][2] for l in g), max(l["box"][3] for l in g)),
                         "conf": round(sum(confs) / len(confs) / 100, 3) if confs else None})
+    if unrotate:
+        for o in out:
+            x0, y0, x1, y1 = o["bbox"]
+            (ax, ay), (bx, by) = unrotate(x0, y0), unrotate(x1, y1)
+            o["bbox"] = (min(ax, bx), min(ay, by), max(ax, bx), max(ay, by))
     return out
 
 
 # ───────────────────────────── 6. layout / reading order ──────────────────
 
-def find_gutter(lines, page_width) -> Optional[float]:
+def segment_regions(words, rules, obstacles, box, depth=0) -> list:
+    """Split a page area into reading-order regions where independent blocks sit
+    side by side, e.g. two tables exported from one spreadsheet that share a row
+    grid. Whitespace alone can't tell those apart from the columns of one table,
+    so a split needs rule lines that stop at the gutter on both sides (a single
+    table's rules run straight across). Returns region boxes in reading order:
+    above, left, right, below (each split further if needed)."""
+    bx0, by0, bx1, by1 = box
+    ws = [w for w in words if bx0 <= (w.x0 + w.x1) / 2 <= bx1 and by0 <= (w.top + w.bottom) / 2 <= by1]
+    # rules clipped to the box: a full-width separator still crosses the gutter
+    rs = [(max(r[0], bx0), min(r[1], bx1), r[2]) for r in rules
+          if r[1] > bx0 and r[0] < bx1 and by0 <= r[2] <= by1 and min(r[1], bx1) - max(r[0], bx0) >= 20]
+    if depth > 3 or len(ws) < 6 or len(rs) < 2 or len(rs) > 300:
+        return [box]                       # >300 rules: a drawing, not a page of tables
+    width = bx1 - bx0
+    lo, hi = bx0 + 0.15 * width, bx0 + 0.85 * width
+    cands = set()
+    for x0, x1, _ in rs:
+        cands.update(x for x in (x1 + 3, x0 - 3) if lo <= x <= hi)
+    by_y = defaultdict(list)
+    for r in rs:
+        by_y[round(r[2])].append(r)
+    for row in by_y.values():
+        row.sort()
+        for a, b in zip(row, row[1:]):
+            if b[0] - a[1] >= 4 and lo <= (a[1] + b[0]) / 2 <= hi:
+                cands.add((a[1] + b[0]) / 2)
+
+    def nlines(group):
+        return len({round(w.top / 2) for w in group})
+
+    def alpha_lines(group):
+        return len({round(w.top / 2) for w in group if sum(ch.isalpha() for ch in w.text) >= 3})
+
+    rows = group_lines(ws, 0)
+    best = None
+    for x in sorted(cands):
+        crossing = [(w.top, w.bottom) for w in ws if w.x0 - 1 < x < w.x1 + 1]
+        for ln in rows:                    # a sentence running across x (normal word space)
+            lw = [w for w in ln.words if w.x1 <= x]
+            rw = [w for w in ln.words if w.x0 >= x]
+            if lw and rw:
+                a, b = max(lw, key=lambda w: w.x1), min(rw, key=lambda w: w.x0)
+                if b.x0 - a.x1 <= 0.8 * max(a.size, b.size):
+                    crossing.append((ln.top, ln.bottom))
+        crossing += [(r[2] - 0.5, r[2] + 0.5) for r in rs if r[0] - 2 <= x <= r[1] + 2]
+        crossing += [(o[1], o[3]) for o in obstacles if o[0] < x < o[2] and o[1] < by1 and o[3] > by0]
+        runs, cur = [], by0
+        for t, b in sorted(crossing):
+            if t > cur:
+                runs.append((cur, t))
+            cur = max(cur, b)
+        if cur < by1:
+            runs.append((cur, by1))
+        for ry0, ry1 in runs:
+            if ry1 - ry0 < 30:
+                continue
+            L = [w for w in ws if ry0 <= (w.top + w.bottom) / 2 <= ry1 and (w.x0 + w.x1) / 2 < x]
+            R = [w for w in ws if ry0 <= (w.top + w.bottom) / 2 <= ry1 and (w.x0 + w.x1) / 2 > x]
+            if nlines(L) < 3 or nlines(R) < 3:
+                continue
+            # both sides must be text blocks: a statement's number columns are not
+            if alpha_lines(L) < max(2, 0.5 * nlines(L)) or alpha_lines(R) < max(2, 0.5 * nlines(R)):
+                continue
+            lr = [r for r in rs if ry0 < r[2] < ry1 and r[1] <= x - 1]
+            rr = [r for r in rs if ry0 < r[2] < ry1 and r[0] >= x + 1]
+            if not lr or not rr:
+                continue
+            lx0, lx1 = min(w.x0 for w in L), max(w.x1 for w in L)
+            rx0, rx1 = min(w.x0 for w in R), max(w.x1 for w in R)
+            cov_l = max((min(r[1], lx1) - max(r[0], lx0)) / max(lx1 - lx0, 1) for r in lr)
+            cov_r = max((min(r[1], rx1) - max(r[0], rx0)) / max(rx1 - rx0, 1) for r in rr)
+            if cov_l < 0.5 or cov_r < 0.5:
+                continue
+            # one table with a rule under each column has its rules at the same
+            # heights on both sides; independent blocks mostly don't
+            ly = sorted({round(r[2], 1) for r in lr})
+            ryy = sorted({round(r[2], 1) for r in rr})
+            shared = sum(1 for y in ly if any(abs(y - y2) <= 1.5 for y2 in ryy))
+            if shared / min(len(ly), len(ryy)) >= 0.75 and not (
+                    rule_spans_columns(max(lr, key=lambda r: r[1] - r[0]), L)
+                    and rule_spans_columns(max(rr, key=lambda r: r[1] - r[0]), R)):
+                continue          # same heights and one column per rule: one table
+            score = (ry1 - ry0, -abs(x - (bx0 + bx1) / 2))
+            if best is None or score > best[0]:
+                xl = max([w.x1 for w in L] + [r[1] for r in lr])
+                xr = min([w.x0 for w in R] + [r[0] for r in rr])
+                # the side-by-side part ends where the shorter side ends; what
+                # follows (e.g. a new section) is read after both sides
+                end = min(max([w.bottom for w in L] + [r[2] for r in lr]),
+                          max([w.bottom for w in R] + [r[2] for r in rr])) + 1
+                longer = L if max(w.bottom for w in L) > max(w.bottom for w in R) else R
+                tops = sorted({round(w.top, 1) for w in longer})
+                pitch = statistics.median([b - a for a, b in zip(tops, tops[1:])] or [12.0])
+                for t in tops:             # rows that continue at the side's own spacing
+                    if t <= end:
+                        continue
+                    if t - end > 1.25 * pitch:
+                        break
+                    end = max(w.bottom for w in longer if round(w.top, 1) == t) + 1
+                for o in obstacles:            # never cut through a chart or picture
+                    if o[1] < end < o[3] and o[2] > bx0 and o[0] < bx1:
+                        end = o[3] + 1
+                best = (score, (xl + xr) / 2 if xr > xl else x, ry0, max(min(ry1, end), ry0 + 1))
+    if best is None:
+        return [box]
+    _, sx, ry0, ry1 = best
+    out = []
+    for sub in ((bx0, by0, bx1, ry0), (bx0, ry0, sx, ry1), (sx, ry0, bx1, ry1), (bx0, ry1, bx1, by1)):
+        if sub[2] - sub[0] > 1 and sub[3] - sub[1] > 1:
+            out.extend(segment_regions(words, rules, obstacles, sub, depth + 1))
+    return out or [box]
+
+
+def rule_spans_columns(rule, words) -> bool:
+    """Is this the header rule of a multi-column table (the header line just above
+    it has 2+ separate cells), rather than a rule under a single column?"""
+    x0, x1, y = rule
+    above = [w for w in words if y - 15 <= w.bottom <= y + 1 and x0 - 2 <= (w.x0 + w.x1) / 2 <= x1 + 2]
+    if not above:
+        return False
+    base = max(w.bottom for w in above)
+    row = sorted((w for w in above if abs(w.bottom - base) <= 2), key=lambda w: w.x0)
+    cells = 1 + sum(1 for a, b in zip(row, row[1:]) if b.x0 - a.x1 > max(a.size, b.size, 6))
+    return cells >= 2
+
+
+def region_of(box, regions) -> int:
+    """Index of the region holding the centre of `box` (nearest one otherwise)."""
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    best, best_d = 0, None
+    for k, (x0, y0, x1, y1) in enumerate(regions):
+        dx = max(x0 - cx, 0, cx - x1)
+        dy = max(y0 - cy, 0, cy - y1)
+        d = dx * dx + dy * dy
+        if best_d is None or d < best_d:
+            best, best_d = k, d
+            if d == 0:
+                break
+    return best
+
+
+def find_gutter(lines, x0, x1=None) -> Optional[float]:
     """Detect a two-column gutter: an x in the middle band that many lines
-    have text on both sides of, and almost none cross."""
+    have text on both sides of, and almost none cross. Scans the area x0..x1
+    (called as find_gutter(lines, page_width) it scans the whole page)."""
+    if x1 is None:
+        x0, x1 = 0.0, x0
     text_lines = [l for l in lines if l.kind == "text"]
     if len(text_lines) < 8:
         return None
     best, best_score = None, 0
-    x = page_width * 0.3
-    while x <= page_width * 0.7:
+    x = x0 + (x1 - x0) * 0.3
+    while x <= x0 + (x1 - x0) * 0.7:
         both = cross = 0
         for ln in text_lines:
             if any(w.x0 < x < w.x1 for w in ln.words):
@@ -744,10 +1171,11 @@ def split_at(line, x) -> list:
     return parts
 
 
-def reading_order(items, page_width) -> list:
+def reading_order(items, x0, x1=None) -> list:
     """Order lines + block items (tables/images). Two-column regions are read
-    left column then right column; full-width items act as separators."""
-    gutter = find_gutter(items, page_width)
+    left column then right column; full-width items act as separators.
+    Scans x0..x1 for the gutter (reading_order(items, page_width) = whole page)."""
+    gutter = find_gutter(items, x0, x1)
     items = sorted(items, key=lambda l: (l.top, l.x0))
     if gutter is None:
         set_colw([l for l in items if l.kind == "text"])
@@ -1170,6 +1598,7 @@ def render_blocks(ordered, base, tiers, col_width, image_md) -> list:
             last = blocks[-1] if blocks else None
             if last and last["level"] == lvl and last["type"] == "section_header" \
                     and prev is not None and gap is not None and gap < size * 0.8 \
+                    and ln.top > prev.top \
                     and abs(prev.size - size) < 0.5 \
                     and header_level(prev.size, base, tiers, prev.bold) == lvl:
                 last["md"] += " " + plain
@@ -1192,7 +1621,7 @@ def render_blocks(ordered, base, tiers, col_width, image_md) -> list:
             flush_list()
             marker, rest_plain = list_marker(text)
             first = ln.words[0].text.strip()
-            if len(ln.words) > 1 and (re.fullmatch(r"[•●○◦▪▫■□‣⁃∙·◆◇►▸➢➤✓✔*\-–—]", first)
+            if len(ln.words) > 1 and (re.fullmatch(r"[•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔*\-–—]", first)
                                       or re.fullmatch(r"\(?\d{1,3}[.)]", first)):
                 rest = styled_text(ln.words[1:])   # keep inline styling
             else:
@@ -1253,6 +1682,14 @@ def postprocess_fragment(md: str) -> str:
     return md.strip()
 
 
+def overlap_fraction(a, b) -> float:
+    """Share of box a's area that lies inside box b."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    area = max((a[2] - a[0]) * (a[3] - a[1]), 1e-6)
+    return max(w, 0) * max(h, 0) / area
+
+
 def union_box(boxes):
     return (min(b[0] for b in boxes), min(b[1] for b in boxes),
             max(b[2] for b in boxes), max(b[3] for b in boxes))
@@ -1302,7 +1739,6 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
             image_dpi: int = 150, password: Optional[str] = None,
             name: Optional[str] = None) -> Result:
     """Convert a PDF (path, URL, or bytes) to Markdown.
-
     mode       "fast": embedded text only, pages without text are skipped
                "auto": embedded text, OCR for pages without a text layer (default)
                "ocr":  OCR every page
@@ -1329,7 +1765,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
         if max_pages:
             idx = idx[:max_pages]
         stats = []
-        pages_lines, heights, widths = {}, {}, {}
+        pages_lines, heights, widths, page_regions = {}, {}, {}, {}
         all_images = []
         complex_layout = False
 
@@ -1405,20 +1841,63 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 items = ocr_items
 
             if use_native:
-                # tables (ruled first, then heuristic on the remaining text)
-                for bbox, rows in ruled_tables(page):
-                    words = [w for w in words
-                             if not center_inside((w.x0, w.top, w.x1, w.bottom), bbox)]
-                    items.append(Line(pageno, [], bbox[0], bbox[2], bbox[1], bbox[3],
-                                      "table", rows))
-                lines = group_lines(words, pageno)
-                for a_, b_, rows in heuristic_tables(lines, page.width):
-                    tl = lines[a_:b_ + 1]
-                    items.append(Line(pageno, [], min(l.x0 for l in tl), max(l.x1 for l in tl),
-                                      tl[0].top, tl[-1].bottom, "table", rows))
-                    for l in tl:
-                        l.kind = "consumed"
-                items.extend(l for l in lines if l.kind == "text")
+                layout = ocr is None          # hybrid (scan + text) pages keep the simple path
+                full = (0.0, 0.0, page.width, page.height)
+                rules = horizontal_rules(page, ox, oy) if layout else []
+                # vector charts: saved as a picture next to their labels (text untouched)
+                chart_boxes = [vf["bbox"] for vf in vector_figures(page, words, ox, oy)] if layout else []
+                if images != "none":
+                    for n_, fb in enumerate(chart_boxes):
+                        px0, ptop, px1, pbottom = page.bbox
+                        ab = (max(fb[0] + ox - 2, px0), max(fb[1] + oy - 2, ptop),
+                              min(fb[2] + ox + 2, px1), min(fb[3] + oy + 2, pbottom))
+                        ref = ImageRef(pageno, len(refs) + n_ + 1, ab, alt=f"Chart (page {pageno})")
+                        if save_image(page, ref, images, image_dir, stem, image_dpi):
+                            all_images.append(ref)
+                            items.append(Line(pageno, [], fb[0], fb[2], fb[1], fb[3], "image", ref))
+                # side-by-side blocks: split the page into regions, read each on its own
+                obstacles = chart_boxes + [box_of(it) for it in items if it.kind == "image"]
+                regions = segment_regions(words, rules, obstacles, full) if layout else [full]
+                page_regions[pageno] = regions
+                multi_region = len(regions) > 1
+                for it in items:
+                    it.region = region_of(box_of(it), regions)
+                for k, rb in enumerate(regions):
+                    rw = [w for w in words if region_of((w.x0, w.top, w.x1, w.bottom), regions) == k] \
+                        if multi_region else words
+                    rpage = page
+                    if multi_region:
+                        px0, ptop, px1, pbottom = page.bbox
+                        try:
+                            rpage = page.crop((max(rb[0] + ox, px0), max(rb[1] + oy, ptop),
+                                               min(rb[2] + ox, px1), min(rb[3] + oy, pbottom)))
+                        except Exception:
+                            rpage = None
+                    # tables (ruled first, then heuristic on the remaining text)
+                    for bbox, rows, cols in (ruled_tables(rpage, (ox, oy)) if rpage is not None else []):
+                        rows, head = table_header_above(bbox, rows, cols, rw)
+                        hid = {id(w) for w in head}
+                        tb = (bbox[0], min([bbox[1]] + [w.top for w in head]), bbox[2], bbox[3])
+                        tw = [w for w in rw if id(w) in hid
+                              or center_inside((w.x0, w.top, w.x1, w.bottom), bbox)]
+                        tids = {id(w) for w in tw}
+                        rw = [w for w in rw if id(w) not in tids]
+                        items.append(Line(pageno, tw, tb[0], tb[2], tb[1], tb[3], "table", rows,
+                                          region=k))
+                    lines = group_lines(rw, pageno)
+                    rrules = [r for r in rules if rb[0] - 1 <= r[0] and r[1] <= rb[2] + 1
+                              and rb[1] <= r[2] <= rb[3]] if multi_region else rules
+                    for a_, b_, rows in heuristic_tables(lines, rb[2] - rb[0], rrules):
+                        tl = lines[a_:b_ + 1]
+                        items.append(Line(pageno, [w for l in tl for w in l.words],
+                                          min(l.x0 for l in tl), max(l.x1 for l in tl),
+                                          tl[0].top, tl[-1].bottom, "table", rows, region=k))
+                        for l in tl:
+                            l.kind = "consumed"
+                    for l in lines:
+                        if l.kind == "text":
+                            l.region = k
+                            items.append(l)
             pages_lines[pageno] = items
             page.close()  # free pdfminer's per-page object cache
 
@@ -1463,7 +1942,17 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
 
         for pageno in sorted(pages_lines):
             items = pages_lines[pageno]
-            if any(l.kind == "text" for l in items):
+            regs = page_regions.get(pageno, [])
+            if len(regs) > 1:          # side-by-side regions: each read on its own, in order
+                seq = []
+                for k, rb in enumerate(regs):
+                    sub = [l for l in items if l.region == k]
+                    if any(l.kind == "text" for l in sub):
+                        seq.extend(reading_order(sub, rb[0], rb[2])[0])
+                    else:
+                        seq.extend(sorted(sub, key=lambda l: (l.top, l.x0)))
+                complex_layout = True
+            elif any(l.kind == "text" for l in items):
                 seq, multi = reading_order(items, widths[pageno])
                 complex_layout |= multi
             elif any(l.kind == "ocr" for l in items):
@@ -1565,7 +2054,6 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
            link_base: Optional[str] = None, ocr_lang: str = "eng",
            page_range: Optional[str] = None, image_dpi: int = 150) -> dict:
     """Firecrawl /scrape-compatible call for PDFs and images.
-
     parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file as
     base64. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
     "maxPages": int, "pages": bool, "blocks": bool, "pageMarkers": bool}.

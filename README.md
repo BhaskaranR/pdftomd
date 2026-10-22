@@ -78,15 +78,35 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 | Bold, italic, links | From font names and link annotations |
 | Lists | Bullets (incl. unmapped bullet glyphs), `1.` `1)` `(a)` markers, hanging-indent numbers, wrapped items |
 | Code | Monospace lines → fenced blocks with indentation kept |
-| Tables | Ruled/boxed tables from drawn lines, then borderless tables from text alignment; lists and two-column prose are rejected |
+| Tables | Ruled/boxed tables from drawn lines, then borderless tables from text alignment; lists and two-column prose are rejected. A header row just above a banded (shaded) table is attached to it; a header + one row counts as a table when the header is underlined |
+| Side-by-side tables | Independent blocks next to each other (e.g. two tables exported from one spreadsheet, sharing a row grid) are split into regions when their rule lines stop at the gutter, and each region is read on its own |
+| Charts | Charts drawn as vector graphics are detected and, with images on, saved as a PNG next to their labels. Numbers are never read out of chart drawings (too unreliable across PDFs); chart text stays in the output as-is |
 | Images | Embedded images cropped and saved as PNG (or base64); tiny icons and full-page backgrounds skipped |
 | Layout | Two-column detection and reading order; running headers/footers and page numbers stripped (`markdown/furniture.rs` rules); drop caps re-attached |
-| Scanned PDFs | Classified like `detector.rs`; `auto`/`ocr` modes run Tesseract (paragraphs, headings by text height, confidence); without Tesseract the page image is kept |
+| Scanned PDFs | Classified like `detector.rs`; `auto`/`ocr` modes run Tesseract (paragraphs, headings by text height, confidence). Pages scanned sideways or upside down are detected and turned upright first. Without Tesseract the page image is kept |
+
+## Charts and scanned pages (vision step)
+
+`pdf2md_vision.py` adds chart data and scanned-page structure using the agent's own vision
+model (e.g. GPT-4o inside a skill), so no API keys are needed:
+
+```bash
+python pdf2md_vision.py prepare report.pdf work/   # draft.md, images, tasks.json (one prompt per image)
+# the agent answers each task into work/answers/<id>.md
+python pdf2md_vision.py merge work/ -o report.md   # every number checked against page text / OCR
+```
+
+Numbers not found in the page's own text are marked ⚠; values read off a drawing are written `~42`.
+Missing answers keep the plain pdf2md output. `skill/` is a ready skill folder (SKILL.md + scripts).
+Tests: `python tests/test_vision.py`.
 
 ## Limits
 
 - Speed: pdfminer is pure Python — roughly 0.1–0.7 s per page depending on density, vs. milliseconds in Rust. Use `--max-pages` or `--page-range` for huge files, or `pip install pdf-inspector` (Firecrawl's own Python bindings) if you only need text and tables.
-- Charts drawn as vector paths (not embedded images) are not captured as images.
+- Without the vision step, charts are pictures plus their labels, not data.
+- Image-only (scanned) pages: OCR gives the words, but table and chart structure inside the image is lost.
+- Side-by-side tables are only split when rule lines separate them; two borderless tables side by side on one row grid still merge.
+- Section labels on a page that is almost all tables may come out as plain lines rather than headings.
 - OCR'd pages give headings and paragraphs, but tables on scanned pages come out as text lines.
 - Block `confidence.layout` is always null (no layout model is used). The base64 field name for `parsers: []` is `base64`; Firecrawl's docs don't name it.
 - Right-to-left scripts, 3+ column layouts, and complex merged-cell tables are handled more simply than in pdf-inspector.
@@ -96,6 +116,8 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 ```bash
 python tests/make_samples.py tests/samples   # builds report.pdf + scanned.pdf
 python pdf2md.py tests/samples/report.pdf -o tests/out/report.md
+python tests/test_layout.py                  # side-by-side tables, charts, and must-not-change cases
+python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
 
 ## Transcription check
