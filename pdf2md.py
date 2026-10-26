@@ -73,7 +73,7 @@ FURNITURE_Y_STDDEV = 0.05
 MIN_IMAGE_PT = 24                   # ignore tiny images (icons, bullets, rules)
 
 BULLETS = "•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔-–—*"
-BULLET_RE = re.compile(r"^\s*([•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔]|[-–—*](?=\s))\s*")
+BULLET_RE = re.compile(r"^\s*([•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤]|[-✓✔–—*](?=\s))\s*")   # ticks/dashes need a space
 NUMBERED_RE = re.compile(
     r"^\s*(\(?(\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])\s+(?=\S)", re.I)
 MONO_RE = re.compile(r"mono|courier|consol|menlo|inconsolata|code|typewriter|"
@@ -145,6 +145,7 @@ class ImageRef:
     path: Optional[str] = None
     data_uri: Optional[str] = None
     alt: str = ""
+    labels: str = ""          # a saved chart's own text (axis ticks, bar names), as one line
 
 
 @dataclass
@@ -158,6 +159,8 @@ class Result:
     processing_time_ms: float
     images: list = field(default_factory=list)
     is_complex: bool = False
+    pages_with_tables: list = field(default_factory=list)    # pdf-inspector's names
+    pages_with_columns: list = field(default_factory=list)   # (columns or side-by-side blocks)
     num_pages: int = 0
     pages: list = field(default_factory=list)
     blocks: list = field(default_factory=list)
@@ -328,6 +331,186 @@ def classify(stats: list) -> tuple:
 
 
 # ───────────────────────────── 2. extraction ──────────────────────────────
+
+# ---- symbol fonts (port of pdf-inspector base14.rs / fonts.rs) ----
+# Symbol and ZapfDingbats read through their own built-in encodings, which pdfminer doesn't apply
+# (code 0x61 is α, not a). Word writes symbol fonts as private-use U+F000+code; those go through the
+# font's own table when it is a known symbol font (Symbol, ZapfDingbats, Wingdings 1-3 — the Wingdings
+# codes are Unicode's mapping, UTC L2/12-368), otherwise through pdf-inspector's rule (bullets and a
+# check mark, else the plain character: text fonts that store ordinary letters there).
+SYMBOL_FONT_TABLES = {   # font code -> Unicode, rows of 16 codes (2x = 0x20-0x2F), - = no glyph
+    "symbol": """
+    2x: 20 21 2200 23 2203 25 26 220B 28 29 2217 2B 2C 2212 2E 2F
+    3x: 30 31 32 33 34 35 36 37 38 39 3A 3B 3C 3D 3E 3F
+    4x: 2245 391 392 3A7 2206 395 3A6 393 397 399 3D1 39A 39B 39C 39D 39F
+    5x: 3A0 398 3A1 3A3 3A4 3A5 3C2 2126 39E 3A8 396 5B 2234 5D 22A5 5F
+    6x: F8E5 3B1 3B2 3C7 3B4 3B5 3C6 3B3 3B7 3B9 3D5 3BA 3BB B5 3BD 3BF
+    7x: 3C0 3B8 3C1 3C3 3C4 3C5 3D6 3C9 3BE 3C8 3B6 7B 7C 7D 223C -
+    Ax: 20AC 3D2 2032 2264 2044 221E 192 2663 2666 2665 2660 2194 2190 2191 2192 2193
+    Bx: B0 B1 2033 2265 D7 221D 2202 2022 F7 2260 2261 2248 2026 F8E6 F8E7 21B5
+    Cx: 2135 2111 211C 2118 2297 2295 2205 2229 222A 2283 2287 2284 2282 2286 2208 2209
+    Dx: 2220 2207 F6DA F6D9 F6DB 220F 221A 22C5 AC 2227 2228 21D4 21D0 21D1 21D2 21D3
+    Ex: 25CA 2329 F8E8 F8E9 F8EA 2211 F8EB F8EC F8ED F8EE F8EF F8F0 F8F1 F8F2 F8F3 F8F4
+    Fx: - 232A 222B 2320 F8F5 2321 F8F6 F8F7 F8F8 F8F9 F8FA F8FB F8FC F8FD F8FE -""",
+    "zapfdingbats": """
+    2x: 20 2701 2702 2703 2704 260E 2706 2707 2708 2709 261B 261E 270C 270D 270E 270F
+    3x: 2710 2711 2712 2713 2714 2715 2716 2717 2718 2719 271A 271B 271C 271D 271E 271F
+    4x: 2720 2721 2722 2723 2724 2725 2726 2727 2605 2729 272A 272B 272C 272D 272E 272F
+    5x: 2730 2731 2732 2733 2734 2735 2736 2737 2738 2739 273A 273B 273C 273D 273E 273F
+    6x: 2740 2741 2742 2743 2744 2745 2746 2747 2748 2749 274A 274B 25CF 274D 25A0 274F
+    7x: 2750 2751 2752 25B2 25BC 25C6 2756 25D7 2758 2759 275A 275B 275C 275D 275E -
+    8x: 2768 2769 276A 276B 276C 276D 276E 276F 2770 2771 2772 2773 2774 2775 - -
+    Ax: - 2761 2762 2763 2764 2765 2766 2767 2663 2666 2665 2660 2460 2461 2462 2463
+    Bx: 2464 2465 2466 2467 2468 2469 2776 2777 2778 2779 277A 277B 277C 277D 277E 277F
+    Cx: 2780 2781 2782 2783 2784 2785 2786 2787 2788 2789 278A 278B 278C 278D 278E 278F
+    Dx: 2790 2791 2792 2793 2794 2192 2194 2195 2798 2799 279A 279B 279C 279D 279E 279F
+    Ex: 27A0 27A1 27A2 27A3 27A4 27A5 27A6 27A7 27A8 27A9 27AA 27AB 27AC 27AD 27AE 27AF
+    Fx: - 27B1 27B2 27B3 27B4 27B5 27B6 27B7 27B8 27B9 27BA 27BB 27BC 27BD 27BE -""",
+    "wingdings": """
+    2x: 20 1F589 2702 2701 1F453 1F56D 1F56E 1F56F 1F57F 2706 1F582 1F583 1F4EA 1F4EB 1F4EC 1F4ED
+    3x: 1F5C0 1F5C1 1F5CE 1F5CF 1F5D0 1F5C4 23F3 1F5AE 1F5B0 1F5B2 1F5B3 1F5B4 1F5AB 1F5AC 2707 270D
+    4x: 1F58E 270C 1F58F 1F44D 1F44E 261C 261E 261D 1F597 1F590 263A 1F610 2639 1F4A3 1F571 1F3F3
+    5x: 1F3F1 2708 263C 1F322 2744 1F546 271E 1F548 2720 2721 262A 262F 1F549 2638 2648 2649
+    6x: 264A 264B 264C 264D 264E 264F 2650 2651 2652 2653 1F670 1F675 26AB 1F53E 25FC 1F78F
+    7x: 1F790 2751 2752 1F79F 29EB 25C6 2756 1F799 2327 2BB9 2318 1F3F5 1F3F6 1F676 1F677 -
+    8x: 1F10B 2780 2781 2782 2783 2784 2785 2786 2787 2788 2789 1F10C 278A 278B 278C 278D
+    9x: 278E 278F 2790 2791 2792 2793 1F662 1F660 1F661 1F663 1F65E 1F65C 1F65D 1F65F 2219 2022
+    Ax: 2B1D 2B58 1F786 1F788 1F78A 1F78B 1F53F 25AA 1F78E 1F7C1 1F7C5 2605 1F7CB 1F7CF 1F7D3 1F7D1
+    Bx: 2BD0 2316 2BCE 2BCF 2BD1 272A 2730 1F550 1F551 1F552 1F553 1F554 1F555 1F556 1F557 1F558
+    Cx: 1F559 1F55A 1F55B 2BB0 2BB1 2BB2 2BB3 2BB4 2BB5 2BB6 2BB7 1F66A 1F66B 1F655 1F654 1F657
+    Dx: 1F656 1F650 1F651 1F652 1F653 232B 2326 2B98 2B9A 2B99 2B9B 2B88 2B8A 2B89 2B8B 1F868
+    Ex: 1F86A 1F869 1F86B 1F86C 1F86D 1F86F 1F86E 1F878 1F87A 1F879 1F87B 1F87C 1F87D 1F87F 1F87E 21E6
+    Fx: 21E8 21E7 21E9 2B04 21F3 2B01 2B00 2B03 2B02 1F8AC 1F8AD 1F5F6 2713 1F5F7 1F5F9 -""",
+    "wingdings2": """
+    2x: 20 1F58A 1F58B 1F58C 1F58D 2704 2700 1F57E 1F57D 1F5C5 1F5C6 1F5C7 1F5C8 1F5C9 1F5CA 1F5CB
+    3x: 1F5CC 1F5CD 1F4CB 1F5D1 1F5D4 1F5B5 1F5B6 1F5B7 1F5B8 1F5AD 1F5AF 1F5B1 1F592 1F593 1F598 1F599
+    4x: 1F59A 1F59B 1F448 1F449 1F59C 1F59D 1F59E 1F59F 1F5A0 1F5A1 1F446 1F447 1F5A2 1F5A3 1F591 1F5F4
+    5x: 1F5F8 1F5F5 2611 2BBD 2612 2BBE 2BBF 1F6C7 29B8 1F671 1F674 1F672 1F673 203D 1F679 1F67A
+    6x: 1F67B 1F666 1F664 1F665 1F667 1F65A 1F658 1F659 1F65B 24EA 2460 2461 2462 2463 2464 2465
+    7x: 2466 2467 2468 2469 24FF 2776 2777 2778 2779 277A 277B 277C 277D 277E 277F -
+    8x: 2609 1F315 263D 263E 2E3F 271D 1F547 1F55C 1F55D 1F55E 1F55F 1F560 1F561 1F562 1F563 1F564
+    9x: 1F565 1F566 1F567 1F668 1F669 22C5 1F784 2981 25CF 25CB 1F785 1F787 1F789 2299 29BF 1F78C
+    Ax: 1F78D 25FE 25A0 25A1 1F791 1F792 1F793 1F794 25A3 1F795 1F796 1F797 1F798 2B29 2B25 25C7
+    Bx: 1F79A 25C8 1F79B 1F79C 1F79D 1F79E 2B2A 2B27 25CA 1F7A0 25D6 25D7 2BCA 2BCB 2BC0 2BC1
+    Cx: 2B1F 2BC2 2B23 2B22 2BC3 2BC4 1F7A1 1F7A2 1F7A3 1F7A4 1F7A5 1F7A6 1F7A7 1F7A8 1F7A9 1F7AA
+    Dx: 1F7AB 1F7AC 1F7AD 1F7AE 1F7AF 1F7B0 1F7B1 1F7B2 1F7B3 1F7B4 1F7B5 1F7B6 1F7B7 1F7B8 1F7B9 1F7BA
+    Ex: 1F7BB 1F7BC 1F7BD 1F7BE 1F7BF 1F7C0 1F7C2 1F7C4 1F7C6 1F7C9 1F7CA 2736 1F7CC 1F7CE 1F7D0 1F7D2
+    Fx: 2739 1F7C3 1F7C7 272F 1F7CD 1F7D4 2BCC 2BCD 203B 2042 - - - - - -""",
+    "wingdings3": """
+    2x: 20 2B60 2B62 2B61 2B63 2B66 2B67 2B69 2B68 2B70 2B72 2B71 2B73 2B76 2B78 2B7B
+    3x: 2B7D 2B64 2B65 2B6A 2B6C 2B6B 2B6D 2B4D 2BA0 2BA1 2BA2 2BA3 2BA4 2BA5 2BA6 2BA7
+    4x: 2B90 2B91 2B92 2B93 2B80 2B83 2B7E 2B7F 2B84 2B86 2B85 2B87 2B8F 2B8D 2B8E 2B8C
+    5x: 2B6E 2B6F 238B 2324 2303 2325 2423 237D 21EA 2BB8 1F8A0 1F8A1 1F8A2 1F8A3 1F8A4 1F8A5
+    6x: 1F8A6 1F8A7 1F8A8 1F8A9 1F8AA 1F8AB 1F850 1F852 1F851 1F853 1F854 1F855 1F857 1F856 1F858 1F859
+    7x: 25B2 25BC 25B3 25BD 25C0 25B6 25C1 25B7 25E3 25E2 25E4 25E5 1F780 1F782 1F781 -
+    8x: 1F783 2BC5 2BC6 2BC7 2BC8 2B9C 2B9E 2B9D 2B9F 1F810 1F812 1F811 1F813 1F814 1F816 1F815
+    9x: 1F817 1F818 1F81A 1F819 1F81B 1F81C 1F81E 1F81D 1F81F 1F800 1F802 1F801 1F803 1F804 1F806 1F805
+    Ax: 1F807 1F808 1F80A 1F809 1F80B 1F820 1F822 1F824 1F826 1F828 1F82A 1F82C 1F89C 1F89D 1F89E 1F89F
+    Bx: 1F82E 1F830 1F832 1F834 1F836 1F838 1F83A 1F839 1F83B 1F898 1F89A 1F899 1F89B 1F83C 1F83E 1F83D
+    Cx: 1F83F 1F840 1F842 1F841 1F843 1F844 1F846 1F845 1F847 2BA8 2BA9 2BAA 2BAB 2BAC 2BAD 2BAE
+    Dx: 2BAF 1F860 1F862 1F861 1F863 1F864 1F865 1F867 1F866 1F870 1F872 1F871 1F873 1F874 1F875 1F877
+    Ex: 1F876 1F880 1F882 1F881 1F883 1F884 1F885 1F887 1F886 1F890 1F892 1F891 1F893 1F894 1F896 1F895
+    Fx: 1F897 - - - - - - - - - - - - - - -""",
+}
+
+
+def _parse_symbol_table(rows: str) -> dict:
+    out = {}
+    for row in rows.strip().splitlines():
+        hi, cells = row.split(":")
+        for lo, cell in enumerate(cells.split()):
+            if cell != "-":
+                out[int(hi.strip()[0], 16) * 16 + lo] = chr(int(cell, 16))
+    return out
+
+
+SYMBOL_TABLES = {name: _parse_symbol_table(rows) for name, rows in SYMBOL_FONT_TABLES.items()}
+# Standard-14 names only (plus MT/ITC aliases): a font that merely mentions Symbol is not Symbol.
+BASE14_SYMBOL_NAMES = {"symbol": "symbol", "symbolmt": "symbol", "symbolitc": "symbol",
+                       "zapfdingbats": "zapfdingbats", "dingbats": "zapfdingbats",
+                       "itczapfdingbats": "zapfdingbats", "zapfdingbatsitc": "zapfdingbats"}
+OWN_ENCODING = {"symbol": "SymbolEncoding", "zapfdingbats": "ZapfDingbatsEncoding"}
+
+
+def _symbol_table_for(base_font: str) -> Optional[str]:
+    """The symbol table a font name reads through, or None for an ordinary font."""
+    prefix, sep, rest = (base_font or "").partition("+")
+    name = rest if sep and len(prefix) == 6 and prefix.isalpha() and prefix.isupper() else (base_font or "")
+    lower = name.lower()
+    if lower in BASE14_SYMBOL_NAMES:
+        return BASE14_SYMBOL_NAMES[lower]
+    m = re.fullmatch(r"wingdings[ -]?([23])?(?:[ ,-]*(?:regular|normal))?", lower)
+    return "wingdings" + (m.group(1) or "") if m else None
+
+
+def _clean_private_use(text: str, table: Optional[str]) -> str:
+    """U+F000-F0FF (Word's symbol-font codes): through the font's table, else pdf-inspector's rule."""
+    if not any("\uf000" <= c <= "\uf0ff" for c in text):
+        return text
+    out = []
+    for c in text:
+        low = ord(c) - 0xF000
+        if not 0 <= low <= 0xFF:
+            out.append(c)
+        elif table and low in SYMBOL_TABLES[table]:
+            out.append(SYMBOL_TABLES[table][low])
+        elif low in (0xA1, 0xA7, 0xB7):
+            out.append("\u2022")
+        elif low == 0xFC:
+            out.append("\u2713")
+        else:
+            out.append(chr(low) if low >= 0x20 else c)
+    return "".join(out)
+
+
+def _fix_symbol_font(font, spec) -> None:
+    """Give a just-loaded pdfminer font its symbol encoding and private-use cleanup."""
+    from pdfminer.encodingdb import name2unicode
+    from pdfminer.pdffont import PDFSimpleFont
+    from pdfminer.psparser import PSLiteral
+    from pdfminer.pdftypes import resolve1
+    if getattr(font, "_pdf2md_fixed", False):
+        return
+    font._pdf2md_fixed = True
+    base = resolve1(spec.get("BaseFont"))
+    table = _symbol_table_for(base.name if isinstance(base, PSLiteral) else str(base or ""))
+    if table and isinstance(font, PDFSimpleFont) and font.unicode_map is None:
+        enc = resolve1(spec.get("Encoding"))
+        named = enc.name if isinstance(enc, PSLiteral) else None
+        if named is None or named == OWN_ENCODING.get(table):      # a named encoding replaces it
+            cmap = dict(SYMBOL_TABLES[table])
+            if isinstance(enc, dict):                                  # /Differences still win
+                code = 0
+                for item in resolve1(enc.get("Differences")) or []:
+                    item = resolve1(item)
+                    if isinstance(item, int):
+                        code = item
+                    elif isinstance(item, PSLiteral):
+                        try:
+                            cmap[code] = name2unicode(item.name)
+                        except (KeyError, ValueError):
+                            pass
+                        code += 1
+            font.cid2unicode = cmap
+    original = font.to_unichr
+
+    def to_unichr(cid):
+        return _clean_private_use(original(cid), table)
+    font.to_unichr = to_unichr
+
+
+def open_pdf(data: bytes, password: Optional[str] = None):
+    """pdfplumber.open, with each font fixed as it loads (symbol fonts; see above)."""
+    pdf = pdfplumber.open(io.BytesIO(data), password=password or "")
+    get_font = pdf.rsrcmgr.get_font
+
+    def fixed_get_font(objid, spec):
+        font = get_font(objid, spec)
+        _fix_symbol_font(font, spec)
+        return font
+    pdf.rsrcmgr.get_font = fixed_get_font
+    return pdf
+
 
 def page_origin(page) -> tuple:
     """pdfplumber coordinates are absolute; pages whose MediaBox/CropBox does
@@ -566,6 +749,38 @@ def header_ruled(first, second, rules) -> bool:
     return False
 
 
+PROSE_RUN_ON = 0.5        # share of row-to-row cell pairs that continue a sentence
+PROSE_MAX_DIGITS = 0.1    # prose has few numbers; tables of text cells don't run on
+
+
+def runs_on_like_prose(rows_lines, segs_of) -> bool:
+    """Columns of prose look like a table to text alignment (narrow columns give short
+    segments). In prose each column's text runs on into the next row: the next segment
+    starts lowercase, or the previous one doesn't end a sentence. Table cells don't."""
+    cols = defaultdict(list)                 # words per segment, by column position
+    for ln in rows_lines:
+        sg = segs_of(ln)
+        if len(sg) >= 2:
+            for k, x in enumerate(sg):
+                cols[k].append(len(x))
+    if not cols or min(sum(v) / len(v) for v in cols.values()) < 3:
+        return False                         # a column of markers or short cells: not prose
+    pairs = cont = 0
+    for a, b in zip(rows_lines, rows_lines[1:]):
+        sa, sb = segs_of(a), segs_of(b)
+        if len(sa) != len(sb) or len(sa) < 2:
+            continue
+        for x, y in zip(sa, sb):
+            pairs += 1
+            first = next((ch for ch in y[0].text if ch.isalpha()), "")
+            ends = x[-1].text.rstrip()[-1:] in ".:;!?"
+            cont += bool(first.islower() or (not ends and first and y[0].text[:1].isalpha()
+                                              and len(x) >= 4 and len(y) >= 4))
+    words = [w for ln in rows_lines for w in ln.words]
+    digits = sum(1 for w in words if any(ch.isdigit() for ch in w.text)) / max(len(words), 1)
+    return pairs >= 4 and cont >= PROSE_RUN_ON * pairs and digits < PROSE_MAX_DIGITS
+
+
 def heuristic_tables(lines, page_width, rules=()) -> list:
     """Text-alignment tables (tables/detect_heuristic.rs, simplified):
     ≥3 consecutive rows whose cell segments leave consistent vertical
@@ -640,6 +855,9 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
         if markerish == len(firsts) and all(len(segments(l)) == 2 for l in rows_lines):
             i = best_j + 1
             continue  # a list with hanging indents, not a table
+        if runs_on_like_prose(rows_lines, segs_of):
+            i = best_j + 1                   # columns of prose: skip it whole, no tail "tables"
+            continue
         if avg_words > 6 or len(rows_lines) < min_rows:
             i += 1
             continue
@@ -809,6 +1027,49 @@ def _cv(vals) -> float:
     return statistics.pstdev(vals) / m if m else 0.0
 
 
+BAR_BASE_TOL = 1.0     # pt: bars of one chart stand on one baseline
+BAR_LEN_CV = 0.1       # their lengths differ (rating squares and cell fills don't)
+
+
+def one_colour_bars(ms, axes, words) -> bool:
+    """A one-series bar chart: >= 3 marks on a shared baseline with lengths that vary, next to an
+    axis line or numeric tick labels. (Two or more colours already count as a chart.)"""
+    for base, length in (("bottom", lambda m: m["bottom"] - m["top"]),      # vertical bars
+                         ("x0", lambda m: m["x1"] - m["x0"])):              # horizontal bars
+        ref = statistics.median(m[base] for m in ms)
+        bars = [m for m in ms if abs(m[base] - ref) <= BAR_BASE_TOL]
+        if len(bars) < 3 or _cv([length(m) for m in bars]) <= BAR_LEN_CV:
+            continue
+        box = _bbox(bars)
+        near = lambda b: b["x0"] <= box[2] + 30 and b["x1"] >= box[0] - 30 and \
+            b["top"] <= box[3] + 30 and b["bottom"] >= box[1] - 30
+        if any(near(a) for a in axes):
+            return True
+        ticks = [w for w in words if re.fullmatch(r"-?\d[\d,.]*%?", w.text) and
+                 near({"x0": w.x0, "x1": w.x1, "top": w.top, "bottom": w.bottom})]
+        if len(ticks) >= 3:
+            return True
+    return False
+
+
+CHART_LABEL_MAX_WORDS = 3   # chart labels are short: ticks, bar and series names
+CHART_MIN_TICKS = 3         # and an axis has several plain-number ticks
+
+
+def chart_labels(words) -> str:
+    """A chart's text in reading order, one label per gap-separated segment: "14, 12, …, Alpha".
+    "" when the text doesn't look like chart labels (a shaded table mistaken for a chart keeps
+    its text where it is)."""
+    out = []
+    for ln in group_lines(words, 0):
+        out += [join_words(sg) for sg in segments(ln)]
+    out = [t for t in out if t.strip()]
+    ticks = sum(1 for t in out if re.fullmatch(r"[-−(]?\d[\d,.]*%?\)?", t))
+    if ticks < CHART_MIN_TICKS or any(len(t.split()) > CHART_LABEL_MAX_WORDS for t in out):
+        return ""
+    return ", ".join(out)
+
+
 def vector_figures(page, words, ox, oy) -> list:
     """Charts drawn with vector graphics, as boxes (page-relative) to save as
     pictures. Reading numbers out of chart drawings isn't reliable across PDFs
@@ -876,7 +1137,7 @@ def vector_figures(page, words, ox, oy) -> list:
         clusters[find(i)].append(marks[i])
     figs = []
     for ms in clusters.values():
-        if len(ms) < 3 or len({m["ck"] for m in ms}) < 2:
+        if len(ms) < 3 or (len({m["ck"] for m in ms}) < 2 and not one_colour_bars(ms, axes, words)):
             continue
         box = _bbox(ms)
         if (box[2] - box[0]) * (box[3] - box[1]) < 1200:
@@ -1168,9 +1429,10 @@ def find_gutter(lines, x0, x1=None) -> Optional[float]:
     if len(text_lines) < 8:
         return None
     best, best_score = None, 0
+    n = len(text_lines)
     x = x0 + (x1 - x0) * 0.3
     while x <= x0 + (x1 - x0) * 0.7:
-        both = cross = 0
+        both = cross = one_side = 0
         for ln in text_lines:
             if any(w.x0 < x < w.x1 for w in ln.words):
                 cross += 1
@@ -1180,9 +1442,14 @@ def find_gutter(lines, x0, x1=None) -> Optional[float]:
                 right = min(w.x0 for w in ln.words if w.x0 >= x)
                 if right - left >= 8:
                     both += 1
+            else:
+                one_side += 1            # beside a picture or table in the other column
         score = both - 3 * cross
-        if both >= max(5, 0.35 * len(text_lines)) and cross <= 0.15 * len(text_lines) \
-                and score > best_score:
+        # columns: many lines with text on both sides, almost none crossing; lines with text on one
+        # side only (next to a block in the other column) are consistent with that, not against it
+        if cross <= 0.15 * n and score > best_score and (
+                both >= max(5, 0.35 * n) or
+                (both >= max(5, 0.2 * n) and both + one_side >= 0.8 * n)):
             best, best_score = x, score
         x += 2
     return best
@@ -1199,20 +1466,53 @@ def split_at(line, x) -> list:
     return parts
 
 
-def reading_order(items, x0, x1=None) -> list:
+def spans_gutter(line, gutter) -> bool:
+    """A full-width line whose word space happens to fall on the gutter: the gap there is an
+    ordinary space, not the white space between two columns."""
+    left = [w.x1 for w in line.words if (w.x0 + w.x1) / 2 < gutter]
+    right = [w.x0 for w in line.words if (w.x0 + w.x1) / 2 >= gutter]
+    return bool(left and right) and min(right) - max(left) <= max(4.0, 0.6 * line.size)
+
+
+def fills_columns(lines, lo, gutter, hi) -> bool:
+    """A nested gutter splits real columns only if the text on both sides fills its column
+    (a key/value list inside one column has short segments on both sides)."""
+    def fill(parts, width):
+        ws = sorted(p.x1 - p.x0 for p in parts if len(p.words) >= 3)
+        return bool(ws) and ws[len(ws) // 2] >= 0.6 * width
+    left = [p for l in lines if l.kind == "text" for p in split_at(l, gutter) if p.x1 <= gutter + 1]
+    right = [p for l in lines if l.kind == "text" for p in split_at(l, gutter) if p.x0 >= gutter - 1]
+    if not left or not right:
+        return False
+    # measured to where the text ends (the page margin is not part of a column)
+    return fill(left, gutter - max(lo, min(p.x0 for p in left))) and \
+        fill(right, min(hi, max(p.x1 for p in right)) - gutter)
+
+
+def reading_order(items, x0, x1=None, depth=0) -> list:
     """Order lines + block items (tables/images). Two-column regions are read
-    left column then right column; full-width items act as separators.
+    left column then right column; full-width items act as separators; each side is
+    checked for another gutter (up to three columns).
     Scans x0..x1 for the gutter (reading_order(items, page_width) = whole page)."""
+    lo, hi = (0.0, x0) if x1 is None else (x0, x1)
     gutter = find_gutter(items, x0, x1)
+    if gutter is not None and depth and not fills_columns(items, lo, gutter, hi):
+        gutter = None
     items = sorted(items, key=lambda l: (l.top, l.x0))
     if gutter is None:
         set_colw([l for l in items if l.kind == "text"])
         return items, False
     out, left, right = [], [], []
 
+    def side(part, a, b):
+        part = sorted(part, key=lambda l: l.top)
+        if depth < 1 and sum(1 for l in part if l.kind == "text") >= 8:
+            return reading_order(part, a, b, depth + 1)[0]
+        return part
+
     def flush():
-        out.extend(sorted(left, key=lambda l: l.top))
-        out.extend(sorted(right, key=lambda l: l.top))
+        out.extend(side(left, lo, gutter))
+        out.extend(side(right, gutter, hi))
         left.clear()
         right.clear()
 
@@ -1226,7 +1526,7 @@ def reading_order(items, x0, x1=None) -> list:
             else:
                 right.append(it)
             continue
-        if any(w.x0 < gutter < w.x1 for w in it.words):
+        if any(w.x0 < gutter < w.x1 for w in it.words) or spans_gutter(it, gutter):
             flush()
             out.append(it)
             continue
@@ -1465,7 +1765,8 @@ def list_marker(text: str):
     """Return (markdown_marker, rest)."""
     m = BULLET_RE.match(text)
     if m:
-        return "-", text[m.end():]
+        tick = m.group(1) if m.group(1) in "✓✔" else ""     # a tick is content: "- ✓ Done"
+        return "-", (tick + " " if tick else "") + text[m.end():]
     m = NUMBERED_RE.match(text)
     if m:
         tok = m.group(2)
@@ -1652,6 +1953,8 @@ def render_blocks(ordered, base, tiers, col_width, image_md) -> list:
             if len(ln.words) > 1 and (re.fullmatch(r"[•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔*\-–—]", first)
                                       or re.fullmatch(r"\(?\d{1,3}[.)]", first)):
                 rest = styled_text(ln.words[1:])   # keep inline styling
+                if first in "✓✔":
+                    rest = f"{first} {rest}"
             else:
                 rest = rest_plain                  # lettered markers stay in text
             cur_list = (marker, [rest.strip()], ln.x0, [ln])
@@ -1811,7 +2114,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
     if images == "save" and not image_dir:
         image_dir = f"{stem}_images"
 
-    with pdfplumber.open(io.BytesIO(data), password=password or "") as pdf:
+    with open_pdf(data, password) as pdf:
         n = len(pdf.pages)
         idx = parse_pages(page_range, n)
         if max_pages:
@@ -1896,7 +2199,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 layout = ocr is None          # hybrid (scan + text) pages keep the simple path
                 full = (0.0, 0.0, page.width, page.height)
                 rules = horizontal_rules(page, ox, oy) if layout else []
-                # vector charts: saved as a picture next to their labels (text untouched)
+                # vector charts: saved as a picture; its own labels move into one line under it
                 chart_boxes = [vf["bbox"] for vf in vector_figures(page, words, ox, oy)] if layout else []
                 if images != "none":
                     for n_, fb in enumerate(chart_boxes):
@@ -1905,6 +2208,10 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                               min(fb[2] + ox + 2, px1), min(fb[3] + oy + 2, pbottom))
                         ref = ImageRef(pageno, len(refs) + n_ + 1, ab, alt=f"Chart (page {pageno})")
                         if save_image(page, ref, images, image_dir, stem, image_dpi):
+                            inside = [w for w in words if center_inside((w.x0, w.top, w.x1, w.bottom), fb)]
+                            ref.labels = chart_labels(inside)
+                            if ref.labels:              # chart-like text only; else it stays put
+                                words = [w for w in words if w not in inside]
                             all_images.append(ref)
                             items.append(Line(pageno, [], fb[0], fb[2], fb[1], fb[3], "image", ref))
                 # side-by-side blocks: split the page into regions, read each on its own
@@ -1966,18 +2273,20 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
 
         def image_md(ref):
             alt = ref.alt or f"Image {ref.index} (page {ref.page})"
+            note = f"\n\n*Chart labels: {ref.labels}*" if ref.labels else ""
             if ref.data_uri:
-                return f"![{alt}]({ref.data_uri})"
+                return f"![{alt}]({ref.data_uri})" + note
             if ref.path:
                 path = os.path.relpath(os.path.abspath(ref.path), link_base) if link_base \
                     else ref.path
-                return f"![{alt}]({path.replace(os.sep, '/')})"
+                return f"![{alt}]({path.replace(os.sep, '/')})" + note
             return ""
 
         # ---- assemble document markdown, per-page markdown and blocks ----
         doc = []          # fragments of the document markdown
         pos = 0
         pages_out, blocks_out = [], []
+        table_pages, column_pages = [], []
         title_set = False
         title_text = None
         prev_list = False
@@ -2004,9 +2313,12 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                     else:
                         seq.extend(sorted(sub, key=lambda l: (l.top, l.x0)))
                 complex_layout = True
+                column_pages.append(pageno)
             elif any(l.kind == "text" for l in items):
                 seq, multi = reading_order(items, widths[pageno])
                 complex_layout |= multi
+                if multi:
+                    column_pages.append(pageno)
             elif any(l.kind == "ocr" for l in items):
                 seq = items          # OCR page: Tesseract order, figures already slotted in
             else:
@@ -2060,6 +2372,8 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 it["id"] = f"p{pageno}.b{k}"
                 it["readingOrder"] = k
             page_items = [{"id": it.pop("id"), **it} for it in page_items]
+            if any(it["type"] == "table" for it in page_items):
+                table_pages.append(pageno)
             pages_out.append({"pageNumber": pageno, "markdown": "".join(page_md)})
             status = ("skipped" if pageno in skipped else
                       "ocr_unavailable" if pageno in ocr_missing and not page_md else "ok")
@@ -2076,6 +2390,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
     r = Result(md, pdf_type, n, confidence, needs_ocr, title,
                round((time.time() - t0) * 1000, 1), all_images, complex_layout)
     r.num_pages = len(idx)
+    r.pages_with_tables, r.pages_with_columns = table_pages, column_pages
     r.pages = pages_out
     r.blocks = blocks_out
     r.source_name = name
@@ -2398,6 +2713,30 @@ then a Markdown table. Copy printed numbers exactly; a value read from a bar len
 or an axis gets a leading ~ (for example ~42); leave a cell empty if you cannot read it.
 If it is not a chart or a table (a logo, a photo, a signature), output only: NONE"""
 
+TABLES_PROMPT = """This image is page {page} of a PDF. It has {count} table(s).
+Our text extraction of the page, for the exact spelling of words and numbers:
+---
+{context}
+---
+Write only the tables, in the order they appear on the page, each as one Markdown table
+(a header row, then one row per row on the page). Put a blank line between tables.
+Copy every word and number exactly as printed, including minus signs and brackets around
+negative numbers. Keep every row and column; leave a cell empty only if it is empty on
+the page. Do not add totals, notes, or anything that is not in the table.
+Output only the tables."""
+
+LAYOUT_PROMPT = """This image is page {page} of a PDF laid out in columns or side-by-side blocks.
+Our text extraction of the page, for the exact spelling of words and numbers:
+---
+{context}
+---
+Write the whole page as Markdown in reading order: each column top to bottom before the
+next one, each side-by-side block on its own. Headings as #, ##, ###; paragraphs as text;
+lists as - or 1.; tables as Markdown tables, one row per row on the page.
+Copy every word and number exactly as printed, including minus signs and brackets.
+Do not summarize, reword, skip, or add anything that is not on the page.
+Output only the Markdown."""
+
 PAGE_PROMPT = """This image is page {page} of a scanned PDF.
 Transcribe the whole page as Markdown, top to bottom:
 - headings as #, ##, ###; paragraphs as text; lists as - or 1.
@@ -2413,6 +2752,7 @@ Output only the Markdown."""
 # A number in the model's answer must match the page in value, sign and row.
 
 NUM_RE = re.compile(r"(~\s*)?(\(\s*)?([-−]\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)(\s*\))?")
+WORD_RE = re.compile(r"[^\W\d_]{2,}")
 GROUPED_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 ISSUES = (("unverified", "NOT FOUND in page text"), ("sign", "SIGN DIFFERS from page text"),
           ("wrong_row", "IN ANOTHER ROW"), ("row_unconfirmed", "ROW NOT CONFIRMED"))
@@ -2454,14 +2794,21 @@ def _keys(text) -> set:
     return out
 
 
+ROW_CELL_MAX_WORDS = 3      # a data row's value cells are short; longer cells are prose
+
+
 def _row_labels(answer) -> list:
-    """[(start, end, label)] for answer table rows whose first cell is text."""
+    """[(start, end, label)] for answer data rows: first cell is text, value cells are short.
+    Rows with prose cells (an equipment list) get no row check: their label words recur
+    all over the page."""
     out, pos = [], 0
     for line in answer.splitlines(keepends=True):
         st = line.strip()
         if st.startswith("|") and not re.fullmatch(r"[|\-:\s]+", st):
-            lab = st.strip("|").split("|")[0].strip()
-            if len(lab) >= 2 and not number_tokens(lab):
+            cells = [c.strip() for c in st.strip("|").split("|")]
+            lab = cells[0]
+            if len(lab) >= 2 and not number_tokens(lab) and \
+                    all(len(WORD_RE.findall(c)) <= ROW_CELL_MAX_WORDS for c in cells[1:]):
                 out.append((pos, pos + len(line), lab))
         pos += len(line)
     return out
@@ -2539,7 +2886,8 @@ def _ocr_text(img) -> str:
     return "\n".join(p["text"] for p in paras)
 
 
-def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=None):
+def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=None,
+            hard_pages=False, max_hard_pages=None):
     if not ocr_available():                 # numbers on scans/pictures are checked against OCR
         raise RuntimeError("Tesseract is required for the vision step: install it "
                            "(macOS: brew install tesseract; Linux: apt install tesseract-ocr) "
@@ -2579,7 +2927,7 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
     # scanned pages: the whole page, upright
     scan_dir = os.path.join(work, "scans")
     data, _, _ = load_source(src)
-    with pdfplumber.open(io.BytesIO(data), password=password or "") as pdf:
+    with open_pdf(data, password) as pdf:
         for pageno in sorted(page_md):
             page = pdf.pages[pageno - 1]
             if page_stats(page)["kind"] not in ("scan", "hybrid") and mode != "ocr":
@@ -2594,6 +2942,30 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
                           "check_text": page_md.get(pageno, "")})
             page.close()
 
+        # hard text pages: tables (tables only) or columns (whole page), checked against the text layer
+        if hard_pages:
+            scanned = {t["page"] for t in tasks if t["kind"] == "page"}
+            hard = [p for p in sorted(page_md) if p not in scanned
+                    and (p in r.pages_with_columns or p in r.pages_with_tables)]
+            for pageno in hard[:max_hard_pages]:
+                page = pdf.pages[pageno - 1]
+                os.makedirs(os.path.join(work, "hard"), exist_ok=True)
+                page.to_image(resolution=SCAN_DPI).original.save(
+                    os.path.join(work, "hard", f"page_{pageno}.png"))
+                native = page.extract_text() or ""
+                context = page_md.get(pageno, "")[:CONTEXT_CHARS]
+                if pageno in r.pages_with_columns:
+                    task = {"id": f"p{pageno}_layout", "kind": "layout", "reason": "columns",
+                            "prompt": LAYOUT_PROMPT.format(page=pageno, context=context)}
+                else:
+                    n = len(TABLE_BLOCK_RE.findall(page_md.get(pageno, "")))
+                    task = {"id": f"p{pageno}_tables", "kind": "tables", "tables": n,
+                            "reason": f"{n} table{'s' * (n != 1)}",
+                            "prompt": TABLES_PROMPT.format(page=pageno, count=n, context=context)}
+                task.update(page=pageno, image=f"hard/page_{pageno}.png", check_text=native)
+                tasks.append(task)
+                page.close()
+
     manifest = {"source": r.source_name, "pdf_type": r.pdf_type, "ocr_available": have_ocr,
                 "pages": sorted(page_md), "tasks": tasks}
     with open(os.path.join(work, "tasks.json"), "w", encoding="utf-8") as f:
@@ -2602,6 +2974,101 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
 
 
 # ---- merge ----
+
+TABLE_BLOCK_RE = re.compile(r"(?:^\|.*\|[ \t]*(?:\n|$))+", re.M)
+# Provisional limits for a whole-page (layout) answer against the page's text layer: (at least,
+# share of the page's words). Set from the evaluation on 10 real pages (tasks/hard-pages.md, D).
+LAYOUT_MAX_NEW_WORDS = (2, 0.005)      # answer words that are not on the page
+LAYOUT_MAX_MISSING_WORDS = (3, 0.01)   # page words left out of the answer
+LAYOUT_MAX_NEW_PAIRS = (3, 0.01)       # answer word pairs found neither in our draft nor on a page line
+
+
+def _words(text):
+    return WORD_RE.findall(re.sub(r"(\w)-\n(\w)", r"\1\2", text).lower())
+
+
+def _pairs(words):
+    return list(zip(words, words[1:]))
+
+
+def word_check(answer, native, ours):
+    """Does a whole-page answer say what the page says? -> list of problems (empty = ok)."""
+    page = Counter(_words(native))
+    n = max(sum(page.values()), 1)
+    left = page.copy()
+    split = defaultdict(list)            # text-layer quirk: one word in two pieces ("do cument")
+    for line in native.splitlines():
+        ws = _words(line)
+        for a, b in _pairs(ws):
+            split[a + b].append((a, b))
+    new, ws, i = [], _words(answer), 0
+    while i < len(ws):
+        w = ws[i]
+        joined = w + ws[i + 1] if i + 1 < len(ws) else None
+        if left[w]:
+            left[w] -= 1
+        elif joined and left[joined]:        # the other quirk: two words run together ("eachform")
+            left[joined] -= 1
+            i += 1
+        elif any(left[a] and left[b] for a, b in split.get(w, ())):
+            a, b = next((a, b) for a, b in split[w] if left[a] and left[b])
+            left[a] -= 1
+            left[b] -= 1
+        else:
+            new.append(w)
+        i += 1
+    missing = sum(left.values())
+    known = set(_pairs(_words(ours))) | {p for line in native.splitlines() for p in _pairs(_words(line))}
+    prose = [line for line in answer.splitlines() if not line.lstrip().startswith("|")]
+    new_pairs = {p for line in prose for p in _pairs(_words(line)) if p not in known}   # tables: cells
+    # wrap and the page's lines mix columns, so word order is only checked in prose
+    limit = lambda rule: max(rule[0], rule[1] * n)
+    problems = []
+    if len(new) > limit(LAYOUT_MAX_NEW_WORDS):
+        problems.append(f"words not on the page: {', '.join(new[:8])}")
+    if missing > limit(LAYOUT_MAX_MISSING_WORDS):
+        problems.append(f"page words missing from the answer: {missing} of {n}")
+    if len(new_pairs) > limit(LAYOUT_MAX_NEW_PAIRS):
+        problems.append(f"word order not on the page: {len(new_pairs)} pairs")
+    return problems
+
+
+def _merge_hard(t, answer, pages):
+    """A tables/layout answer for a text page: used only if it matches the text layer, else ours stays.
+    Returns the report fields."""
+    out = {}
+    page_md = pages.get(t["page"], "")
+
+    def kept(why):
+        out["status"] = f"kept rule-based output: {why}"
+        return out
+    if t["kind"] == "tables":
+        theirs = [m.group().strip() for m in TABLE_BLOCK_RE.finditer(answer)]
+        ours = list(TABLE_BLOCK_RE.finditer(page_md))
+        if not len(theirs) == len(ours) == t["tables"]:
+            return kept(f"table count differs (answer {len(theirs)}, page {t['tables']})")
+        checked = "\n\n".join(theirs)
+    else:
+        checked = answer
+    _, issues, estimated = check_answer(checked, t["check_text"])
+    out.update(issues)
+    if estimated:
+        return kept(f"{estimated} estimated value(s) on a page with a text layer")
+    if issues["unverified"] or issues["sign"] or issues["wrong_row"]:
+        return kept("numbers don't match the page")
+    if t["kind"] == "tables":
+        for m, table in reversed(list(zip(ours, theirs))):
+            end = m.start() + len(m.group().rstrip("\n"))
+            page_md = page_md[:m.start()] + table + page_md[end:]
+        pages[t["page"]] = page_md
+        out["status"] = f"merged {len(theirs)} table{'s' * (len(theirs) != 1)}"
+        return out
+    problems = word_check(answer, t["check_text"], page_md)
+    if problems:
+        return kept("; ".join(problems))
+    pages[t["page"]] = answer.strip()
+    out["status"] = "merged page"
+    return out
 
 PAGE_SPLIT = re.compile(r"<!-- page (\d+) -->\n?")
 
@@ -2628,6 +3095,10 @@ def merge(work, page_markers=False):
         with open(ans_path, encoding="utf-8") as f:
             answer = f.read().strip()
         answer = re.sub(r"^```\w*\n|\n```$", "", answer).strip()  # stray code fences
+        if t["kind"] in ("tables", "layout"):
+            entry.update(_merge_hard(t, answer, pages))
+            report.append(entry)
+            continue
         if t["kind"] == "picture" and answer.upper().startswith("NONE"):
             entry["status"] = "not a chart or table"
             report.append(entry)
@@ -2691,6 +3162,9 @@ def vision_main(argv):
     p.add_argument("--page-range")
     p.add_argument("--max-pages", type=int)
     p.add_argument("--password")
+    p.add_argument("--hard-pages", action="store_true",
+                   help="also send text pages with tables (tables only) or columns (whole page)")
+    p.add_argument("--max-hard-pages", type=int, help="at most N hard pages, in page order")
     m = sub.add_parser("merge", help="check the model's answers and write the final markdown")
     m.add_argument("work")
     m.add_argument("-o", "--output", help="markdown file (default: print)")
@@ -2698,7 +3172,8 @@ def vision_main(argv):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "prepare":
-            man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password)
+            man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password,
+                          a.hard_pages, a.max_hard_pages)
         else:
             md, report = merge(a.work, a.page_markers)
     except Exception as e:  # noqa: BLE001 -- one clean line, as for plain conversion
@@ -2706,7 +3181,8 @@ def vision_main(argv):
     if a.cmd == "prepare":
         print(f"{len(man['tasks'])} image task(s) in {os.path.join(a.work, 'tasks.json')}")
         for t in man["tasks"]:
-            print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}")
+            why = f"   ({t['reason']})" if t.get("reason") else ""
+            print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}{why}")
         return
     if a.output:
         with open(a.output, "w", encoding="utf-8") as f:

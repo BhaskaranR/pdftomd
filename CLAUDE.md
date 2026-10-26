@@ -13,7 +13,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   `python make_skill.py` builds the installable folder in `dist/pdf-to-markdown/` from the real files (add new ones to its FILES).
 - `pdf2md.py` — extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
-  scanned pages; number check against page text/OCR). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
+  scanned pages; number check against page text/OCR; opt-in `--hard-pages`: text pages with tables/columns, used only
+  if numbers and words match the text layer, else rule-based output kept). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
 - `chunk2md.py` — `chunk()`: the final markdown cut into pieces for embeddings, for every format (reads markdown
   structure; PDF blocks add pages/bboxes via markdownSpan). Stdlib only, so search code can import it without PDF
   libraries. `scrape(chunk=…)` / `--chunks` load it lazily. Tests: `tests/test_chunk.py`.
@@ -38,7 +39,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 2. Words → lines (page-relative coordinates via `page.bbox`).
 3. Tables: ruled (`find_tables`, lines strategy) then borderless (text alignment).
 4. Vector charts detected (filled shapes) and saved as images only — never converted to numbers (tried;
-   too unreliable across layouts). Side-by-side blocks split into regions (rules that stop at a gutter,
+   too unreliable across layouts). With images on, a chart's own text (numeric ticks + short labels) moves into one
+   `*Chart labels: …*` line under the image; text that doesn't look like chart labels stays where it is. Side-by-side blocks split into regions (rules that stop at a gutter,
    rule heights mostly different on each side, both sides text) and read separately; two-column reading
    order; repeated headers/footers and page numbers stripped.
 5. Body size + heading tiers (H1–H4), then typed blocks: paragraphs, lists, code, tables, figures, captions.
@@ -73,6 +75,7 @@ Errors: `EMAIL_UNREADABLE|EMAIL_UNSUPPORTED`.
   - check that every block's `markdownSpan` slices to its `content` (`--blocks` JSON).
   - `python tests/test_sheet.py` (must print all passed)
   - `python tests/test_chunk.py` (must print all passed)
+  - `python tests/test_fonts.py` (must print all passed)
   - `python tests/test_mail.py` (must print all passed)
 - Any code change invalidates the fingerprints: regenerate with
   `python verify_transcription.py pdf2md.py > fingerprints.txt` and rebuild `fingerprints_2col.txt`
@@ -98,10 +101,25 @@ Errors: `EMAIL_UNREADABLE|EMAIL_UNSUPPORTED`.
 
 ## Open work
 1. Done: LICENSE (MIT) + NOTICE (pdf-inspector + anydoc).
-2. Done for charts/pictures/scans via `pdf2md.py prepare`/`merge` (the office runs skills + MCP only, so the agent's
-   model reads the images; no API calls from Python). Not yet: sending hard *text* pages (complex tables,
-   multi-column) through the same step.
-3. Wingdings/symbol-font arrows (e.g. rank up/down) come out as unreadable glyphs; needs the font name from a real file.
+2. Done: charts/pictures/scans via `pdf2md.py prepare`/`merge` (the office runs skills + MCP only, so the agent's
+   model reads the images; no API calls from Python), and hard *text* pages (tables, columns) via opt-in
+   `prepare --hard-pages` (PR #6).
+3. Done: symbol fonts (Symbol/ZapfDingbats built-in encodings; Word's private-use symbol codes; Wingdings 1-3 via
+   Unicode's mapping, beyond pdf-inspector, which turns them into letters).
 4. Done: `chunk()` for embeddings (`chunk2md.py`; `scrape(chunk=…)`, `--chunks`).
-5. Spreadsheets: .xls, .xlsb, .ods (anydoc reads all three in-house; .xls parked 2026-10-26 until real files need it).
-   Pictures in workbooks → vision step.
+5. Spreadsheets: .xls, .xlsb (anydoc reads both in-house; .xls parked 2026-10-26 until real files need it —
+   relevant if broker-vote exports come from older systems). Pictures in workbooks → vision step.
+
+Found by running Firecrawl's public test files (64 files; 18 compared with pdf-inspector's snapshots, 2026-10-26),
+ranked for the office's documents — mostly broker votes (equity, FICC): tables of brokers, scores, ranks, footnotes:
+6. Superscripts are flattened into the text, so footnote marks stick to numbers: `8.4¹` → `8.41`, `H₂O` → `H2O`
+   (pdf-inspector writes `<sup>…</sup>` / Unicode superscripts; see its `author_block_superscripts` snapshot).
+   Highest priority: a silent wrong value in scorecard tables.
+7. Password-protected PDF through `scrape()`: the error message is empty (`PdfminerException:`). The CLI already
+   says "pass --password" and works with it; make `scrape()` raise the same clear error.
+8. Lower: side-by-side prose or a sidebar next to body text is sometimes read as a 2-column table (pdf-inspector
+   `real-estate-pricing`, `thermo-freon12`).
+
+Won't do (user, 2026-10-26; not relevant to broker votes — don't propose): embedded TrueType fonts that name glyphs
+only inside the font program (pdf-inspector `glyph_names_in_embedded_fonts.pdf`); Hebrew/Arabic reading order;
+`.ods` support.

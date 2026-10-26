@@ -83,13 +83,14 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 | Headings H1–H4 | Font-size tiers vs. body size (≥1.2×, sizes within 0.5pt share a tier), bold fallback, base-size correction — ported from `markdown/analysis.rs` |
 | Paragraphs | Line grouping, paragraph breaks by spacing / short last line / indent, de-hyphenation |
 | Bold, italic, links | From font names and link annotations |
-| Lists | Bullets (incl. unmapped bullet glyphs), `1.` `1)` `(a)` markers, hanging-indent numbers, wrapped items |
+| Lists | Bullets (incl. unmapped bullet glyphs), `1.` `1)` `(a)` markers, hanging-indent numbers, wrapped items; a tick `✓ Done` stays in the item |
+| Symbol fonts | Symbol and ZapfDingbats read through their own encodings (`αβγ`, `✓✔`, `→`); Word's private-use symbol codes decoded — bullets `•`, Symbol Greek, Wingdings 1–3 checkboxes and arrows (`🞏 ☑ ☒ 🡹 🡻`, Unicode's mapping). Other fonts' private-use codes follow pdf-inspector (plain letters) |
 | Code | Monospace lines → fenced blocks with indentation kept |
 | Tables | Ruled/boxed tables from drawn lines, then borderless tables from text alignment; lists and two-column prose are rejected. A header row just above a banded (shaded) table is attached to it; a header + one row counts as a table when the header is underlined |
 | Side-by-side tables | Independent blocks next to each other (e.g. two tables exported from one spreadsheet, sharing a row grid) are split into regions when their rule lines stop at the gutter, and each region is read on its own |
-| Charts | Charts drawn as vector graphics are detected and, with images on, saved as a PNG next to their labels. Numbers are never read out of chart drawings (too unreliable across PDFs); chart text stays in the output as-is |
+| Charts | Charts drawn as vector graphics (one or more colours) are detected and, with images on, saved as a PNG next to their labels. Numbers are never read out of chart drawings (too unreliable across PDFs); with images on, the chart's own labels (axis ticks, bar names) become one `*Chart labels: …*` line under the image, and with images off they stay as text |
 | Images | Embedded images cropped and saved as PNG (or base64); tiny icons and full-page backgrounds skipped |
-| Layout | Two-column detection and reading order; running headers/footers and page numbers stripped (`markdown/furniture.rs` rules); drop caps re-attached |
+| Layout | Two- and three-column detection and reading order (columns with a table or picture inside them too; full-width lines stay whole); running headers/footers and page numbers stripped (`markdown/furniture.rs` rules); drop caps re-attached |
 | Scanned PDFs | Classified like `detector.rs`; `auto`/`ocr` modes run Tesseract (paragraphs, headings by text height, confidence). Pages scanned sideways or upside down are detected and turned upright first. Without Tesseract the page image is kept |
 
 ## Spreadsheets (xlsx, xlsm, csv)
@@ -227,6 +228,23 @@ OCR on JPEG scans sometimes misreads a digit (`17.5` as `1735`); the model's cor
 flagged ⚠, never passed silently.
 Missing answers keep the plain pdf2md output.
 
+### Hard text pages (opt-in)
+
+`prepare --hard-pages [--max-hard-pages N]` also sends text pages our rules may get wrong, one page at a
+time: a page with tables gets a `tables` task (the model returns only the tables), a page with columns or
+side-by-side blocks gets a `layout` task (the whole page in reading order). These pages have a text layer,
+so `merge` uses an answer only if it matches it: every number by value, sign and row, no `~` estimates, the
+same number of tables, and, for whole pages, the same words (none added, almost none left out, word order
+found on the page). Otherwise the rule-based output stays and the report says why:
+
+```
+p1_tables: merged 1 table
+p2_layout: kept rule-based output: words not on the page: and, stayed, as, planned; ...
+```
+
+Firecrawl routes a whole document to its hosted parser when any page has a table or columns; this does it
+per page, with the agent's model, and checks the result against the text layer.
+
 To install it as an agent skill, build the skill folder (SKILL.md + copies of `pdf2md.py`, `sheet2md.py` and `msg2md.py`):
 
 ```bash
@@ -249,7 +267,8 @@ Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped wit
 - If two `pdf` parsers are given, the first is used (as in Firecrawl); every one is still checked.
 - CLI errors print the Firecrawl code (`error: SCRAPE_PDF_OCR_REQUIRED: …`); with `--json` the error is
   also printed as `{"success": false, "code": …, "error": …}`.
-- Right-to-left scripts, 3+ column layouts, and complex merged-cell tables are handled more simply than in pdf-inspector.
+- Right-to-left scripts, layouts of more than three columns, and complex merged-cell tables are handled more simply than in pdf-inspector.
+- A borderless table with long prose cells can be read as columns (each cell's text whole, but rows not kept together); `--hard-pages` sends such pages to the vision step.
 
 ## Tests
 
@@ -260,6 +279,7 @@ python tests/test_layout.py                  # side-by-side tables, charts, and 
 python tests/test_contract.py                # Firecrawl options and PDF detection
 python tests/test_sheet.py                   # spreadsheets: Firecrawl sample + anydoc cases + synthetic set
 python tests/test_chunk.py                   # chunks for embeddings
+python tests/test_fonts.py                   # symbol fonts (Symbol, ZapfDingbats, Wingdings, Word private-use codes)
 python tests/compare_anydoc.py               # sheet2md vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
 python tests/test_mail.py                    # emails: .msg/.eml, attachments, HTML/RTF message text
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)

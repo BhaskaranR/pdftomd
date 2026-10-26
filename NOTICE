@@ -3,6 +3,12 @@ pdftomd includes code ported from the following MIT-licensed projects.
 pdf2md.py
   Heuristics ported from Firecrawl's pdf-inspector
   https://github.com/firecrawl/pdf-inspector
+  Symbol and ZapfDingbats encoding tables from pdf-inspector's src/extractor/base14.rs.
+  Wingdings 1-3 code -> Unicode mappings: Unicode Technical Committee document L2/12-368
+  (as tabulated in Wikipedia's "Wingdings" article).
+
+tests/fixtures/symbol_builtin_encoding.pdf, symbol_builtin_encoding.expected.md
+  pdf-inspector's test fixture and snapshot.
 
 sheet2md.py
   Port of the spreadsheet, CSV, header-row and table-rendering code in anydoc
