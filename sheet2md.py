@@ -1616,15 +1616,28 @@ def parse_xlsx(data: bytes, include_hidden=False, charts=False):
     styles = Styles(sibling("styles", "styles.xml"))
 
     by_id = {rid: t for rid, _, t, ext in wb_rels if not ext}
-    sheets = []
+    sheets, every_part = [], {}
     for sh in (_descendants(workbook, "sheet")):
-        if not include_hidden and _attr(sh, "state") in ("hidden", "veryHidden"):
-            continue
         rid = _rel_id(sh)
         target = by_id.get(rid) if rid else None
         part = resolve(wb_part, target) if target else None
         if part is not None:
-            sheets.append((_attr(sh, "name") or "", part))
+            every_part.setdefault(_attr(sh, "name") or "", part)
+            if include_hidden or _attr(sh, "state") not in ("hidden", "veryHidden"):
+                sheets.append((_attr(sh, "name") or "", part))
+
+    read_cache = {}
+
+    def sheet_cells(name):
+        """A sheet's cells for chart references (hidden sheets too), read once."""
+        if name not in read_cache:
+            ws = pkg.xml(every_part[name]) if name in every_part else None
+            read_cache[name] = (read_sheet(ws, shared, styles, date1904)
+                                if ws is not None and _is(ws, "worksheet") else None)
+        return read_cache[name]
+
+    def lookup(f, two_d, visible_only):
+        return _ref_values(f, sheet_cells, two_d, visible_only)
 
     multi = len(sheets) > 1
     blocks, names, failed, unsaved, warnings = [], [], 0, 0, []
@@ -1632,10 +1645,12 @@ def parse_xlsx(data: bytes, include_hidden=False, charts=False):
 
     def chart_blocks(name, part):
         out = []
-        for k, ch in enumerate(sheet_charts(pkg, part, date1904), 1):
+        for k, ch in enumerate(sheet_charts(pkg, part, date1904, lookup), 1):
+            label = ch["title"] or f"Chart {k}"
             if not ch["has_values"]:
-                label = ch["title"] or f"Chart {k}"
                 warnings.append(f"chart '{label}' on sheet '{name}' has no saved values")
+            elif ch["from_cells"]:
+                warnings.append(f"chart '{label}' on sheet '{name}': values read from its cells")
             out.append(("raw", chart_block(ch, k)))
         return out
 
@@ -1695,8 +1710,100 @@ def _cval(el, name="val"):
     return _attr(child, "val") if child is not None else None
 
 
-def _chart_text(tx) -> str:
-    """Text of a c:tx: rich paragraphs, a cached cell reference, or a literal."""
+# A chart that saved no numbers (files written by scripts) still names the cells it plots
+# (c:f, e.g. 'Data'!$B$2:$B$9); those are read from the workbook instead.
+def _ref_area(s):
+    """A1, A1:B9, B:B (whole columns) or 2:2 (whole rows) -> inclusive (r1, c1, r2, c2)."""
+    a, _, b = s.partition(":")
+    b = b or a
+    p, q = parse_ref(a), parse_ref(b)
+    if p is not None and q is not None:
+        return min(p[0], q[0]), min(p[1], q[1]), max(p[0], q[0]), max(p[1], q[1])
+    if a.isalpha() and b.isalpha():
+        p, q = parse_ref(a + "1"), parse_ref(b + "1")
+        if p is not None and q is not None:
+            return 0, min(p[1], q[1]), MAX_ROWS - 1, max(p[1], q[1])
+    if a.isdigit() and b.isdigit() and 1 <= min(int(a), int(b)) and max(int(a), int(b)) <= MAX_ROWS:
+        return min(int(a), int(b)) - 1, 0, max(int(a), int(b)) - 1, MAX_COLS - 1
+    return None
+
+
+def chart_ref_areas(f):
+    """'Sheet'!$A$1:$B$9, or several in parentheses -> [(sheet, r1, c1, r2, c2)]. None when any
+    part points outside the workbook ([1]Book!A1), at a defined name, or can't be read."""
+    f = (f or "").strip()
+    if f.startswith("(") and f.endswith(")"):
+        f = f[1:-1]
+    parts, cur, quoted = [], "", False
+    for ch in f:
+        if ch == "'":
+            quoted = not quoted
+        if ch == "," and not quoted:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    parts.append(cur)
+    out = []
+    for part in (p.strip() for p in parts):
+        if part.startswith("'"):
+            i, name = 1, ""
+            while i < len(part):
+                if part[i] == "'":
+                    if part[i + 1:i + 2] == "'":
+                        name, i = name + "'", i + 2
+                        continue
+                    break
+                name, i = name + part[i], i + 1
+            else:
+                return None
+            rest = part[i + 1:]
+        else:
+            bang = part.find("!")
+            if bang < 0:
+                return None
+            name, rest = part[:bang], part[bang:]
+        if not rest.startswith("!") or not name or "[" in name:
+            return None
+        area = _ref_area(rest[1:].replace("$", ""))
+        if area is None:
+            return None
+        out.append((name,) + area)
+    return out or None
+
+
+def _ref_values(f, sheet_cells, two_d, visible_only):
+    """The texts a chart reference points at, in plotting order, or None if it can't be read.
+    A 2-D range (multi-level categories) joins each row's cells outer to inner with " / "."""
+    areas = chart_ref_areas(f)
+    if not areas:
+        return None
+    out = []
+    for name, r1, c1, r2, c2 in areas:
+        sheet = sheet_cells(name)
+        if sheet is None:
+            return None
+        cells = sheet.cells
+        r2 = min(r2, max((r for r, _ in cells), default=-1))      # whole rows/columns: used area only
+        c2 = min(c2, max((c for _, c in cells), default=-1))
+        hidden_cols = set(_expand_ranges(list(sheet.hidden_cols))) if visible_only else set()
+        rows = [r for r in range(r1, r2 + 1) if not (visible_only and r in sheet.hidden_rows)]
+        cols = [c for c in range(c1, c2 + 1) if c not in hidden_cols]
+        if len(rows) > 1 and len(cols) > 1:
+            if not two_d:
+                return None
+            outer = [""] * (len(cols) - 1)
+            for r in rows:
+                vals = [cells.get((r, c), "") for c in cols]
+                outer = [v or o for v, o in zip(vals[:-1], outer)]
+                out.append(" / ".join(x for x in outer + vals[-1:] if x))
+        else:
+            out.extend(cells.get((r, c), "") for r in rows for c in cols)
+    return out
+
+
+def _chart_text(tx, cells=None) -> str:
+    """Text of a c:tx: rich paragraphs, a cached cell reference (or the cell itself), or a literal."""
     if tx is None:
         return ""
     rich = _child(tx, "rich", CHART_NS)
@@ -1707,6 +1814,10 @@ def _chart_text(tx) -> str:
     pts = _cache_points(ref) if ref is not None else {}
     if pts:
         return collapse_ws(clean_text(pts[min(pts)][0])).strip()
+    f = _child(ref, "f", CHART_NS) if ref is not None else None
+    if f is not None and cells is not None:
+        vals = cells(_text(f))
+        return collapse_ws(clean_text(next((v for v in vals if v), ""))).strip() if vals else ""
     v = _child(tx, "v", CHART_NS)
     return collapse_ws(clean_text(_text(v))).strip() if v is not None else ""
 
@@ -1746,16 +1857,26 @@ def _point_count(holder):
     return 0
 
 
-def _axis_values(axis, date1904):
-    """A series' c:cat / c:val / c:xVal / c:yVal -> ({idx: text}, count, numeric)."""
+def _from_cells(holder, cells, two_d):
+    """({idx: text}, count, numeric, from_cells) read from the cells a reference names."""
+    f = _child(holder, "f", CHART_NS)
+    vals = cells(_text(f), two_d) if f is not None and cells is not None else None
+    if vals is None:
+        return {}, 0, False, False
+    return dict(enumerate(vals)), len(vals), False, True
+
+
+def _axis_values(axis, date1904, cells=None, two_d=False):
+    """A series' c:cat / c:val / c:xVal / c:yVal -> ({idx: text}, count, numeric, from_cells).
+    With no saved values, `cells(f, two_d)` reads the cells the reference points at."""
     if axis is None:
-        return {}, 0, False
+        return {}, 0, False, False
     for holder in axis:
         kind = _local(holder.tag)
         if kind == "multiLvlStrRef":
             cache = _child(holder, "multiLvlStrCache", CHART_NS)
             if cache is None:
-                return {}, 0, False
+                return _from_cells(holder, cells, True)
             levels = [{int(_attr(pt, "idx")): _text(_child(pt, "v", CHART_NS))
                        for pt in _children(lvl, "pt", CHART_NS) if _child(pt, "v", CHART_NS) is not None}
                       for lvl in _children(cache, "lvl", CHART_NS)]
@@ -1770,9 +1891,11 @@ def _axis_values(axis, date1904):
                 if levels and i in levels[0]:
                     labels.append(levels[0][i])
                 out[i] = " / ".join(clean_text(x) for x in labels)
-            return out, count, False
+            return out, count, False, False
         if kind in ("strRef", "numRef", "strLit", "numLit"):
             pts = _cache_points(holder)
+            if not pts and kind in ("strRef", "numRef"):
+                return _from_cells(holder, cells, two_d)
             numeric = kind in ("numRef", "numLit")
             out = {}
             for i, (v, code) in pts.items():
@@ -1786,18 +1909,22 @@ def _axis_values(axis, date1904):
                     out[i] = render_number(fmt, n, date1904)
                 else:
                     out[i] = clean_text(v)
-            return out, max(_point_count(holder), max(pts, default=-1) + 1), numeric
-    return {}, 0, False
+            return out, max(_point_count(holder), max(pts, default=-1) + 1), numeric, False
+    return {}, 0, False, False
 
 
-def read_chart(root, date1904):
-    """-> dict(title, kind, header, series=[(name, [(label, value)])], has_values) or None."""
+def read_chart(root, date1904, lookup=None):
+    """-> dict(title, kind, header, series=[(name, [(label, value)])], has_values, from_cells) or None.
+    lookup(f, two_d, visible_only) reads referenced cells for charts that saved no values."""
     chart = _child(root, "chart", CHART_NS) if root is not None else None
     plot = _child(chart, "plotArea", CHART_NS) if chart is not None else None
     if plot is None:
         return None
+    # Excel leaves hidden rows/columns out of a chart unless plotVisOnly is turned off.
+    visible_only = _cval(chart, "plotVisOnly") not in ("0", "false")
+    cells = (lambda f, two_d=False: lookup(f, two_d, visible_only)) if lookup else None
     title_el = _child(chart, "title", CHART_NS)
-    title = _chart_text(_child(title_el, "tx", CHART_NS)) if title_el is not None else ""
+    title = _chart_text(_child(title_el, "tx", CHART_NS), cells) if title_el is not None else ""
     kinds, series, scatter = [], [], False
     for group in plot:
         local = _local(group.tag)
@@ -1816,26 +1943,28 @@ def read_chart(root, date1904):
             except (TypeError, ValueError):
                 order = len(series) + k
             xy = base in ("scatter", "bubble")
-            cats, n_cat, _ = _axis_values(_child(ser, "xVal" if xy else "cat", CHART_NS), date1904)
-            vals, n_val, _ = _axis_values(_child(ser, "yVal" if xy else "val", CHART_NS), date1904)
-            name = _chart_text(_child(ser, "tx", CHART_NS))
+            cats, n_cat, _, _ = _axis_values(_child(ser, "xVal" if xy else "cat", CHART_NS), date1904,
+                                             cells, two_d=True)
+            vals, n_val, _, read = _axis_values(_child(ser, "yVal" if xy else "val", CHART_NS), date1904, cells)
+            name = _chart_text(_child(ser, "tx", CHART_NS), cells)
             n = max(n_cat, n_val)
             points = [(cats.get(i, "") if n_cat else str(i + 1), vals.get(i, "")) for i in range(n)]
-            series.append((order, name, points, bool(vals)))
+            has = any(vals.values()) if read else bool(vals)
+            series.append((order, name, points, has, read and has))
     series.sort(key=lambda t: t[0])
     header = ""
     for ax in plot:
         if _local(ax.tag) in ("catAx", "dateAx") and not scatter or (
                 scatter and _local(ax.tag) == "valAx" and _cval(ax, "axPos") == "b"):
             t = _child(ax, "title", CHART_NS)
-            header = _chart_text(_child(t, "tx", CHART_NS)) if t is not None else ""
+            header = _chart_text(_child(t, "tx", CHART_NS), cells) if t is not None else ""
             break
     auto_deleted = _cval(chart, "autoTitleDeleted") in ("1", "true")
     if not title and not auto_deleted and len(series) == 1 and series[0][1]:
         title = series[0][1]                  # Excel's automatic title for a one-series chart
     return {"title": title, "kind": " + ".join(kinds) or "chart", "header": header,
-            "series": [(name or f"Series {i + 1}", pts) for i, (_, name, pts, _) in enumerate(series)],
-            "has_values": any(t[3] for t in series)}
+            "series": [(name or f"Series {i + 1}", pts) for i, (_, name, pts, _, _) in enumerate(series)],
+            "has_values": any(t[3] for t in series), "from_cells": any(t[4] for t in series)}
 
 
 def chart_block(ch, number) -> str:
@@ -1860,7 +1989,7 @@ def chart_block(ch, number) -> str:
     return line if table is None else f"{line}\n\n{table}"
 
 
-def sheet_charts(pkg, sheet_part, date1904):
+def sheet_charts(pkg, sheet_part, date1904, lookup=None):
     """Charts drawn on a sheet, top to bottom then left to right: [chart dict]."""
     found = []
     for _, typ, target, ext in pkg.rels(rels_part_for(sheet_part)):
@@ -1883,7 +2012,7 @@ def sheet_charts(pkg, sheet_part, date1904):
             for el in anchor.iter():
                 if _is(el, "chart", CHART_NS):
                     part = chart_parts.get(_rel_id(el))
-                    ch = read_chart(pkg.xml(part), date1904) if part else None
+                    ch = read_chart(pkg.xml(part), date1904, lookup) if part else None
                     if ch is not None:
                         found.append((pos, seq, ch))
     found.sort(key=lambda t: (t[0], t[1]))
@@ -1992,7 +2121,8 @@ def spreadsheet_ext(name: str = "", content_type: Optional[str] = None, data: by
 
 def convert(src, include_hidden: bool = False, ext: Optional[str] = None, charts: bool = False) -> Result:
     """src: path or bytes. ext (".xlsx", ".csv", ...) is needed for bytes that are CSV,
-    which has no signature. charts: add each chart's saved numbers as a table (not in Firecrawl)."""
+    which has no signature. charts: add each chart's numbers as a table (not in Firecrawl): the ones it
+    saved, or else the cells it points at."""
     if isinstance(src, (bytes, bytearray)):
         data = bytes(src)
     else:
