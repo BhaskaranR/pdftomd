@@ -397,6 +397,15 @@ def test_column_chart(labels):
     check(f"{pre}: body text kept", "Volumes rose in every quarter" in md and
           "The chart below shows volume" in md)
     check(f"{pre}: markdownSpan exact", spans_ok(r))
+    ri = convert(p, images="embed")
+    labels_line = next((l for l in ri.markdown.splitlines() if l.startswith("*Chart labels:")), "")
+    check(f"{pre}, images on: ticks and categories gathered in one line under the chart",
+          all(x in labels_line for x in ("Q1", "Q4", "0")), labels_line or ri.markdown[:400])
+    check(f"{pre}, images on: legend outside the chart box still in the text",
+          all(x in ri.markdown for x in ("Desk A", "Desk B")), ri.markdown[:400])
+    check(f"{pre}, images on: body text outside the chart kept",
+          "Volumes rose in every quarter" in ri.markdown and "The chart below shows volume" in ri.markdown)
+    check(f"{pre}, images on: markdownSpan exact", spans_ok(ri))
 
 
 def test_pie():
@@ -505,6 +514,231 @@ def test_mixed_page():
     check(f"{pre}: markdownSpan exact", spans_ok(r) and spans_ok(ri))
 
 
+def demo_pages():
+    """tests/make_demo.py's 4-page PDF, converted once: per-page markdown (images saved)."""
+    if not hasattr(demo_pages, "cache"):
+        from make_demo import build
+        pdf = build(os.path.join(OUT, "layout_demo.pdf"), os.path.join(OUT, "demo_tmp"))
+        r = convert(pdf, images="save", image_dir=os.path.join(OUT, "demo_images"))
+        demo_pages.cache = ({p["pageNumber"]: p["markdown"] for p in r.pages}, r)
+    return demo_pages.cache
+
+
+def in_order(md, needles):
+    pos = [md.find(n) for n in needles]
+    return all(p >= 0 for p in pos) and pos == sorted(pos), dict(zip(needles, pos))
+
+
+def test_demo_two_columns():
+    pages, r = demo_pages()
+    md = pages[2]
+    ok, where = in_order(md, [f"Column paragraph {i}." for i in range(1, 13)])
+    check("demo p2: left column read before right column", ok, where)
+    ok, where = in_order(md, ["Column paragraph 5.", "| North | 214 | 12 |", "Column paragraph 6."])
+    check("demo p2: table in the left column between its paragraphs", ok, where)
+    ok, where = in_order(md, ["Column paragraph 8.", "](", "Figure 2: The new regional office", "Column paragraph 9."])
+    check("demo p2: photo and caption in the right column between its paragraphs", ok, where)
+    check("demo p2: no paragraph broken across columns",
+          all(md.count(f"Column paragraph {i}.") == 1 for i in range(1, 13)) and "the Column paragraph" not in md, md[:300])
+    check("demo p2: marked as a column page", 2 in r.pages_with_columns, r.pages_with_columns)
+
+
+def test_demo_three_columns():
+    pages, r = demo_pages()
+    md = pages[4]
+    check("demo p4: prose columns are not a table", "| Rates | Credit | Equities |" not in md
+          and "| moved with the market" not in md, md[:400])
+    notes = [f"{t} note {k}." for t in ("Rates", "Credit", "Equities") for k in range(1, 5)]
+    ok, where = in_order(md, notes)
+    check("demo p4: three columns read in order", ok, where)
+    ok, where = in_order(md, ["Credit note 4.", "| VaR 99% | 3.2m |", "| Stress | (18.5m) |", "Equities note 1."])
+    check("demo p4: risk table kept, inside the middle column", ok, where)
+    check("demo p4: heading before the columns", in_order(md, ["Outlook and Risks", "Rates note 1."])[0])
+    check("demo p4: full-width sentence above the columns kept whole",
+          "A three-column page: read each column top to bottom before the next." in md, md[:300])
+    check("demo p4: marked as a column page", 4 in r.pages_with_columns, r.pages_with_columns)
+
+
+def test_demo_single_colour_chart():
+    pages, r = demo_pages()
+    md = pages[3]
+    figs = [it for pg in r.blocks if pg["pageNumber"] == 3 for it in pg["items"] if it["type"] == "figure"]
+    check("demo p3: one-colour vector bar chart saved as a figure", len(figs) == 1, figs)
+    ok, where = in_order(md, ["Figure 3: Fund assets", "](", "Returns are net of fees"])
+    check("demo p3: chart image after its title, before the footnote", ok, where)
+    check("demo p3: chart labels in one line under the image",
+          "*Chart labels: 14, 12, 10, 8, 6, 4, 2, 0, Alpha, Beta, Gamma, Delta*" in md, md[-500:])
+    check("demo p3: no loose axis-number lines", not re.search(r"^(14|12|10|8|6|4|2)$", md, re.M), md[-500:])
+    check("demo p3: footnote after the chart kept", in_order(md, ["*Chart labels:", "Returns are net of fees"])[0])
+    plain = run(os.path.join(OUT, "layout_demo.pdf")).markdown
+    check("demo p3, images off: chart text stays as text (no picture to replace it)",
+          "Alpha" in plain and "*Chart labels:" not in plain)
+    check("demo p3: both side-by-side tables still tables",
+          "| Alpha Growth | 12,400 | 8.2% |" in md and "| AAA | 14 | 11.2% |" in md, md[:600])
+
+
+def test_chart_text_fold_only_labels():
+    """Only chart-like text (short labels, numeric ticks) is folded into the labels line; text of a
+    shaded table mistaken for a chart stays as it is."""
+    from pdf2md import Word, chart_labels
+
+    def words(rows):
+        out = []
+        for k, cells in enumerate(rows):
+            for x, t in cells:
+                for j, tok in enumerate(t.split()):
+                    out.append(Word(tok, x + j * 40, x + j * 40 + 36, 100 + 16 * k, 109 + 16 * k, 9.0,
+                                    "Helvetica", False, False, False))
+        return out
+    table = words([[(80, "Area"), (260, "Competence")],
+                   [(80, "1. Embodying sustainability values"), (260, "1.1 Valuing sustainability")],
+                   [(260, "1.2 Supporting fairness")], [(260, "1.3 Promoting nature")]])
+    check("chart text fold: table text mistaken for a chart is not folded", chart_labels(table) == "",
+          chart_labels(table))
+    axis = words([[(40, "14")], [(40, "12")], [(40, "10")], [(40, "0"), (90, "Alpha"), (200, "Beta"), (310, "Gamma")]])
+    check("chart text fold: ticks and short names are folded", chart_labels(axis) == "14, 12, 10, 0, Alpha, Beta, Gamma",
+          chart_labels(axis))
+
+
+def rating_squares(path):
+    """Same-colour rating squares in a row of text (5-star style): marks, not a chart."""
+    c = canvas.Canvas(path, pagesize=(W, H))
+    c.setFont("Helvetica", 10)
+    y = H - 100
+    for k, (name, n) in enumerate((("Service", 4), ("Value", 3), ("Speed", 5), ("Support", 2))):
+        c.drawString(72, y - 24 * k, name)
+        c.setFillColor(colors.HexColor("#2F5597"))
+        for j in range(n):
+            c.rect(160 + j * 16, y - 24 * k - 2, 11, 11, fill=1, stroke=0)
+        c.setFillColor(colors.black)
+    c.drawString(72, y - 120, "Ratings from the client survey, one square per point.")
+    c.save()
+    return path
+
+
+def test_rating_squares_not_chart():
+    r = run(rating_squares(os.path.join(OUT, "rating_squares.pdf")))
+    check("rating squares: no figure invented", not figure_blocks(r), figure_blocks(r))
+
+
+def text_table(path):
+    """A borderless table of short capitalised text cells: a table, not prose."""
+    c = canvas.Canvas(path, pagesize=(W, H))
+    c.setFont("Helvetica-Bold", 10)
+    y = H - 90
+    for x, h in zip((72, 230, 390), ("Office", "Contact", "Role")):
+        c.drawString(x, y, h)
+    c.setFont("Helvetica", 10)
+    for row in (("North Office", "Jane Smith", "Branch Manager"), ("South Office", "Ade Bello", "Credit Lead"),
+                ("West Office", "Mia Chen", "Operations"), ("East Office", "Tom Ruiz", "Compliance"),
+                ("Head Office", "Lea Park", "Finance Director")):
+        y -= 18
+        for x, v in zip((72, 230, 390), row):
+            c.drawString(x, y, v)
+    c.save()
+    return path
+
+
+def marker_list(path):
+    """A list with markers in their own column and wrapped item text (like a scanned form's
+    lettered list): its markers must not be split from their first lines."""
+    c = canvas.Canvas(path, pagesize=(W, H))
+    c.setFont("Helvetica", 10)
+    y = H - 90
+    items = [("A.", ["Manufacturing plants established by reputed companies in the region,"]),
+             ("B.", ["Service organizations such as banks, insurers and telecom operators,"]),
+             ("C.", ["Government agencies, including departments that run public registries,"]),
+             ("D.", ["Reputed non-profit groups in any related sector, or those serving",
+                     "special needs such as education and health care,"]),
+             ("E.", ["Any proposal from a faculty member to spend time in research labs."])]
+    for mark, lines_ in items:
+        c.drawString(72, y, mark)
+        for k, t in enumerate(lines_):
+            c.drawString(126, y - 14 * k, t)
+        y -= 14 * len(lines_) + 4
+    c.save()
+    return path
+
+
+def test_marker_list_kept():
+    md = run(marker_list(os.path.join(OUT, "marker_list.pdf"))).markdown
+    check("marker list: every marker stays with its first line",
+          all(any(m in l and first in l for l in md.splitlines())
+              for m, first in (("A.", "Manufacturing plants"), ("B.", "Service organizations"),
+                               ("C.", "Government agencies"), ("D.", "Reputed non-profit"),
+                               ("E.", "Any proposal"))), md)
+    in_table = sum(1 for m in ("A.", "B.", "C.", "D.", "E.") if f"| {m} |" in md)
+    check("marker list: all items read the same way (all list items, or one table)",
+          in_table in (0, 5) and not re.search(r"^#+ A\.", md, re.M), md[:400])
+
+
+def label_columns_table(path):
+    """A borderless table like a product sheet: two short label columns, then wrapped prose."""
+    c = canvas.Canvas(path, pagesize=(792, 612))
+    c.setFont("Helvetica-Bold", 10)
+    for x, h in ((40, "Service Stage"), (190, "Function Name"), (360, "Explanation")):
+        c.drawString(x, 560, h)
+    c.setFont("Helvetica", 9)
+    rows = [("1. Project creation", ["Project creation and", "management"],
+             ["Select document type to automatically run project creation, with", "recommended model sets and endpoint deployment for each project"]),
+            ("2. Data labeling and", ["Data storage management"],
+             ["Provides convenient functions for uploading raw data, a viewer, and", "data management with search, sorting and filtering on image data"]),
+            ("3. Pipeline setup", ["Pipeline and endpoint", "creation"],
+             ["Choose a detector, recognizer or parser to create a pipeline, then", "connect pipelines to endpoints and manage deployment recovery"]),
+            ("4. Monitoring", ["Project monitoring"],
+             ["Monitoring of deployed pipelines and endpoints, notifying the customer", "of important issues such as degraded model performance over time"])]
+    y = 530
+    for stage, fn, ex in rows:
+        c.drawString(40, y, stage)
+        for k, t in enumerate(fn):
+            c.drawString(190, y - 12 * k, t)
+        for k, t in enumerate(ex):
+            c.drawString(360, y - 12 * k, t)
+        y -= 62
+    c.save()
+    return path
+
+
+def test_label_columns_not_split():
+    md = run(label_columns_table(os.path.join(OUT, "label_columns.pdf"))).markdown
+    near = lambda a, b: any(a in l and b in l for l in md.splitlines())
+    check("label columns page: a row's stage and function stay together",
+          near("1. Project creation", "Project creation and"), md[:500])
+
+
+def test_text_table_stays():
+    md = run(text_table(os.path.join(OUT, "text_table.pdf"))).markdown
+    check("borderless text table (short capitalised cells) stays a table",
+          "| North Office | Jane Smith | Branch Manager |" in md, md)
+
+
+def single_column_short_lines(path):
+    """One column: a paragraph, a short bulleted list and a key/value list (short lines on the left)."""
+    c = canvas.Canvas(path, pagesize=(W, H))
+    c.setFont("Helvetica", 10)
+    y = H - 72
+    c.drawString(72, y, "Account summary for the period, prepared for the committee meeting in October 2026.")
+    for item in ["- Cash balances", "- Open orders", "- Pending transfers", "- Fees charged", "- Notes"]:
+        y -= 16
+        c.drawString(90, y, item)
+    for k, v in [("Prepared by", "J. Okafor"), ("Reviewed by", "M. Lind"), ("Period", "Q3 2026"),
+                 ("Status", "Final"), ("Pages", "4"), ("Copies", "2"), ("Owner", "Finance")]:
+        y -= 16
+        c.drawString(72, y, k)
+        c.drawString(320, y, v)
+    y -= 24
+    c.drawString(72, y, "The figures above were reconciled against the ledger before the meeting started.")
+    c.save()
+    return path
+
+
+def test_single_column_stays():
+    md = run(single_column_short_lines(os.path.join(OUT, "single_short.pdf"))).markdown
+    ok, where = in_order(md, ["Account summary", "Cash balances", "Notes", "Prepared by", "J. Okafor", "Owner",
+                              "Finance", "The figures above"])
+    check("single column with short lines: read top to bottom", ok, where)
+
+
 def test_rotated_scans():
     import pdf2md as P
     if not P.ocr_available():
@@ -520,6 +754,15 @@ def test_rotated_scans():
 
 
 if __name__ == "__main__":
+    test_demo_two_columns()
+    test_single_column_stays()
+    test_demo_three_columns()
+    test_text_table_stays()
+    test_marker_list_kept()
+    test_label_columns_not_split()
+    test_demo_single_colour_chart()
+    test_rating_squares_not_chart()
+    test_chart_text_fold_only_labels()
     test_mixed_page()
     test_rotated_scans()
     test_scorecard("aligned")

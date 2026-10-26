@@ -88,9 +88,9 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 | Code | Monospace lines → fenced blocks with indentation kept |
 | Tables | Ruled/boxed tables from drawn lines, then borderless tables from text alignment; lists and two-column prose are rejected. A header row just above a banded (shaded) table is attached to it; a header + one row counts as a table when the header is underlined |
 | Side-by-side tables | Independent blocks next to each other (e.g. two tables exported from one spreadsheet, sharing a row grid) are split into regions when their rule lines stop at the gutter, and each region is read on its own |
-| Charts | Charts drawn as vector graphics are detected and, with images on, saved as a PNG next to their labels. Numbers are never read out of chart drawings (too unreliable across PDFs); chart text stays in the output as-is |
+| Charts | Charts drawn as vector graphics (one or more colours) are detected and, with images on, saved as a PNG next to their labels. Numbers are never read out of chart drawings (too unreliable across PDFs); with images on, the chart's own labels (axis ticks, bar names) become one `*Chart labels: …*` line under the image, and with images off they stay as text |
 | Images | Embedded images cropped and saved as PNG (or base64); tiny icons and full-page backgrounds skipped |
-| Layout | Two-column detection and reading order; running headers/footers and page numbers stripped (`markdown/furniture.rs` rules); drop caps re-attached |
+| Layout | Two- and three-column detection and reading order (columns with a table or picture inside them too; full-width lines stay whole); running headers/footers and page numbers stripped (`markdown/furniture.rs` rules); drop caps re-attached |
 | Scanned PDFs | Classified like `detector.rs`; `auto`/`ocr` modes run Tesseract (paragraphs, headings by text height, confidence). Pages scanned sideways or upside down are detected and turned upright first. Without Tesseract the page image is kept |
 
 ## Spreadsheets (xlsx, xlsm, csv)
@@ -222,7 +222,8 @@ Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped wit
 - If two `pdf` parsers are given, the first is used (as in Firecrawl); every one is still checked.
 - CLI errors print the Firecrawl code (`error: SCRAPE_PDF_OCR_REQUIRED: …`); with `--json` the error is
   also printed as `{"success": false, "code": …, "error": …}`.
-- Right-to-left scripts, 3+ column layouts, and complex merged-cell tables are handled more simply than in pdf-inspector.
+- Right-to-left scripts, layouts of more than three columns, and complex merged-cell tables are handled more simply than in pdf-inspector.
+- A borderless table with long prose cells can be read as columns (each cell's text whole, but rows not kept together); `--hard-pages` sends such pages to the vision step.
 
 ## Tests
 

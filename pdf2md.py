@@ -145,6 +145,7 @@ class ImageRef:
     path: Optional[str] = None
     data_uri: Optional[str] = None
     alt: str = ""
+    labels: str = ""          # a saved chart's own text (axis ticks, bar names), as one line
 
 
 @dataclass
@@ -748,6 +749,38 @@ def header_ruled(first, second, rules) -> bool:
     return False
 
 
+PROSE_RUN_ON = 0.5        # share of row-to-row cell pairs that continue a sentence
+PROSE_MAX_DIGITS = 0.1    # prose has few numbers; tables of text cells don't run on
+
+
+def runs_on_like_prose(rows_lines, segs_of) -> bool:
+    """Columns of prose look like a table to text alignment (narrow columns give short
+    segments). In prose each column's text runs on into the next row: the next segment
+    starts lowercase, or the previous one doesn't end a sentence. Table cells don't."""
+    cols = defaultdict(list)                 # words per segment, by column position
+    for ln in rows_lines:
+        sg = segs_of(ln)
+        if len(sg) >= 2:
+            for k, x in enumerate(sg):
+                cols[k].append(len(x))
+    if not cols or min(sum(v) / len(v) for v in cols.values()) < 3:
+        return False                         # a column of markers or short cells: not prose
+    pairs = cont = 0
+    for a, b in zip(rows_lines, rows_lines[1:]):
+        sa, sb = segs_of(a), segs_of(b)
+        if len(sa) != len(sb) or len(sa) < 2:
+            continue
+        for x, y in zip(sa, sb):
+            pairs += 1
+            first = next((ch for ch in y[0].text if ch.isalpha()), "")
+            ends = x[-1].text.rstrip()[-1:] in ".:;!?"
+            cont += bool(first.islower() or (not ends and first and y[0].text[:1].isalpha()
+                                              and len(x) >= 4 and len(y) >= 4))
+    words = [w for ln in rows_lines for w in ln.words]
+    digits = sum(1 for w in words if any(ch.isdigit() for ch in w.text)) / max(len(words), 1)
+    return pairs >= 4 and cont >= PROSE_RUN_ON * pairs and digits < PROSE_MAX_DIGITS
+
+
 def heuristic_tables(lines, page_width, rules=()) -> list:
     """Text-alignment tables (tables/detect_heuristic.rs, simplified):
     ≥3 consecutive rows whose cell segments leave consistent vertical
@@ -822,6 +855,9 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
         if markerish == len(firsts) and all(len(segments(l)) == 2 for l in rows_lines):
             i = best_j + 1
             continue  # a list with hanging indents, not a table
+        if runs_on_like_prose(rows_lines, segs_of):
+            i = best_j + 1                   # columns of prose: skip it whole, no tail "tables"
+            continue
         if avg_words > 6 or len(rows_lines) < min_rows:
             i += 1
             continue
@@ -991,6 +1027,49 @@ def _cv(vals) -> float:
     return statistics.pstdev(vals) / m if m else 0.0
 
 
+BAR_BASE_TOL = 1.0     # pt: bars of one chart stand on one baseline
+BAR_LEN_CV = 0.1       # their lengths differ (rating squares and cell fills don't)
+
+
+def one_colour_bars(ms, axes, words) -> bool:
+    """A one-series bar chart: >= 3 marks on a shared baseline with lengths that vary, next to an
+    axis line or numeric tick labels. (Two or more colours already count as a chart.)"""
+    for base, length in (("bottom", lambda m: m["bottom"] - m["top"]),      # vertical bars
+                         ("x0", lambda m: m["x1"] - m["x0"])):              # horizontal bars
+        ref = statistics.median(m[base] for m in ms)
+        bars = [m for m in ms if abs(m[base] - ref) <= BAR_BASE_TOL]
+        if len(bars) < 3 or _cv([length(m) for m in bars]) <= BAR_LEN_CV:
+            continue
+        box = _bbox(bars)
+        near = lambda b: b["x0"] <= box[2] + 30 and b["x1"] >= box[0] - 30 and \
+            b["top"] <= box[3] + 30 and b["bottom"] >= box[1] - 30
+        if any(near(a) for a in axes):
+            return True
+        ticks = [w for w in words if re.fullmatch(r"-?\d[\d,.]*%?", w.text) and
+                 near({"x0": w.x0, "x1": w.x1, "top": w.top, "bottom": w.bottom})]
+        if len(ticks) >= 3:
+            return True
+    return False
+
+
+CHART_LABEL_MAX_WORDS = 3   # chart labels are short: ticks, bar and series names
+CHART_MIN_TICKS = 3         # and an axis has several plain-number ticks
+
+
+def chart_labels(words) -> str:
+    """A chart's text in reading order, one label per gap-separated segment: "14, 12, …, Alpha".
+    "" when the text doesn't look like chart labels (a shaded table mistaken for a chart keeps
+    its text where it is)."""
+    out = []
+    for ln in group_lines(words, 0):
+        out += [join_words(sg) for sg in segments(ln)]
+    out = [t for t in out if t.strip()]
+    ticks = sum(1 for t in out if re.fullmatch(r"[-−(]?\d[\d,.]*%?\)?", t))
+    if ticks < CHART_MIN_TICKS or any(len(t.split()) > CHART_LABEL_MAX_WORDS for t in out):
+        return ""
+    return ", ".join(out)
+
+
 def vector_figures(page, words, ox, oy) -> list:
     """Charts drawn with vector graphics, as boxes (page-relative) to save as
     pictures. Reading numbers out of chart drawings isn't reliable across PDFs
@@ -1058,7 +1137,7 @@ def vector_figures(page, words, ox, oy) -> list:
         clusters[find(i)].append(marks[i])
     figs = []
     for ms in clusters.values():
-        if len(ms) < 3 or len({m["ck"] for m in ms}) < 2:
+        if len(ms) < 3 or (len({m["ck"] for m in ms}) < 2 and not one_colour_bars(ms, axes, words)):
             continue
         box = _bbox(ms)
         if (box[2] - box[0]) * (box[3] - box[1]) < 1200:
@@ -1350,9 +1429,10 @@ def find_gutter(lines, x0, x1=None) -> Optional[float]:
     if len(text_lines) < 8:
         return None
     best, best_score = None, 0
+    n = len(text_lines)
     x = x0 + (x1 - x0) * 0.3
     while x <= x0 + (x1 - x0) * 0.7:
-        both = cross = 0
+        both = cross = one_side = 0
         for ln in text_lines:
             if any(w.x0 < x < w.x1 for w in ln.words):
                 cross += 1
@@ -1362,9 +1442,14 @@ def find_gutter(lines, x0, x1=None) -> Optional[float]:
                 right = min(w.x0 for w in ln.words if w.x0 >= x)
                 if right - left >= 8:
                     both += 1
+            else:
+                one_side += 1            # beside a picture or table in the other column
         score = both - 3 * cross
-        if both >= max(5, 0.35 * len(text_lines)) and cross <= 0.15 * len(text_lines) \
-                and score > best_score:
+        # columns: many lines with text on both sides, almost none crossing; lines with text on one
+        # side only (next to a block in the other column) are consistent with that, not against it
+        if cross <= 0.15 * n and score > best_score and (
+                both >= max(5, 0.35 * n) or
+                (both >= max(5, 0.2 * n) and both + one_side >= 0.8 * n)):
             best, best_score = x, score
         x += 2
     return best
@@ -1381,20 +1466,53 @@ def split_at(line, x) -> list:
     return parts
 
 
-def reading_order(items, x0, x1=None) -> list:
+def spans_gutter(line, gutter) -> bool:
+    """A full-width line whose word space happens to fall on the gutter: the gap there is an
+    ordinary space, not the white space between two columns."""
+    left = [w.x1 for w in line.words if (w.x0 + w.x1) / 2 < gutter]
+    right = [w.x0 for w in line.words if (w.x0 + w.x1) / 2 >= gutter]
+    return bool(left and right) and min(right) - max(left) <= max(4.0, 0.6 * line.size)
+
+
+def fills_columns(lines, lo, gutter, hi) -> bool:
+    """A nested gutter splits real columns only if the text on both sides fills its column
+    (a key/value list inside one column has short segments on both sides)."""
+    def fill(parts, width):
+        ws = sorted(p.x1 - p.x0 for p in parts if len(p.words) >= 3)
+        return bool(ws) and ws[len(ws) // 2] >= 0.6 * width
+    left = [p for l in lines if l.kind == "text" for p in split_at(l, gutter) if p.x1 <= gutter + 1]
+    right = [p for l in lines if l.kind == "text" for p in split_at(l, gutter) if p.x0 >= gutter - 1]
+    if not left or not right:
+        return False
+    # measured to where the text ends (the page margin is not part of a column)
+    return fill(left, gutter - max(lo, min(p.x0 for p in left))) and \
+        fill(right, min(hi, max(p.x1 for p in right)) - gutter)
+
+
+def reading_order(items, x0, x1=None, depth=0) -> list:
     """Order lines + block items (tables/images). Two-column regions are read
-    left column then right column; full-width items act as separators.
+    left column then right column; full-width items act as separators; each side is
+    checked for another gutter (up to three columns).
     Scans x0..x1 for the gutter (reading_order(items, page_width) = whole page)."""
+    lo, hi = (0.0, x0) if x1 is None else (x0, x1)
     gutter = find_gutter(items, x0, x1)
+    if gutter is not None and depth and not fills_columns(items, lo, gutter, hi):
+        gutter = None
     items = sorted(items, key=lambda l: (l.top, l.x0))
     if gutter is None:
         set_colw([l for l in items if l.kind == "text"])
         return items, False
     out, left, right = [], [], []
 
+    def side(part, a, b):
+        part = sorted(part, key=lambda l: l.top)
+        if depth < 1 and sum(1 for l in part if l.kind == "text") >= 8:
+            return reading_order(part, a, b, depth + 1)[0]
+        return part
+
     def flush():
-        out.extend(sorted(left, key=lambda l: l.top))
-        out.extend(sorted(right, key=lambda l: l.top))
+        out.extend(side(left, lo, gutter))
+        out.extend(side(right, gutter, hi))
         left.clear()
         right.clear()
 
@@ -1408,7 +1526,7 @@ def reading_order(items, x0, x1=None) -> list:
             else:
                 right.append(it)
             continue
-        if any(w.x0 < gutter < w.x1 for w in it.words):
+        if any(w.x0 < gutter < w.x1 for w in it.words) or spans_gutter(it, gutter):
             flush()
             out.append(it)
             continue
@@ -2081,7 +2199,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 layout = ocr is None          # hybrid (scan + text) pages keep the simple path
                 full = (0.0, 0.0, page.width, page.height)
                 rules = horizontal_rules(page, ox, oy) if layout else []
-                # vector charts: saved as a picture next to their labels (text untouched)
+                # vector charts: saved as a picture; its own labels move into one line under it
                 chart_boxes = [vf["bbox"] for vf in vector_figures(page, words, ox, oy)] if layout else []
                 if images != "none":
                     for n_, fb in enumerate(chart_boxes):
@@ -2090,6 +2208,10 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                               min(fb[2] + ox + 2, px1), min(fb[3] + oy + 2, pbottom))
                         ref = ImageRef(pageno, len(refs) + n_ + 1, ab, alt=f"Chart (page {pageno})")
                         if save_image(page, ref, images, image_dir, stem, image_dpi):
+                            inside = [w for w in words if center_inside((w.x0, w.top, w.x1, w.bottom), fb)]
+                            ref.labels = chart_labels(inside)
+                            if ref.labels:              # chart-like text only; else it stays put
+                                words = [w for w in words if w not in inside]
                             all_images.append(ref)
                             items.append(Line(pageno, [], fb[0], fb[2], fb[1], fb[3], "image", ref))
                 # side-by-side blocks: split the page into regions, read each on its own
@@ -2151,12 +2273,13 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
 
         def image_md(ref):
             alt = ref.alt or f"Image {ref.index} (page {ref.page})"
+            note = f"\n\n*Chart labels: {ref.labels}*" if ref.labels else ""
             if ref.data_uri:
-                return f"![{alt}]({ref.data_uri})"
+                return f"![{alt}]({ref.data_uri})" + note
             if ref.path:
                 path = os.path.relpath(os.path.abspath(ref.path), link_base) if link_base \
                     else ref.path
-                return f"![{alt}]({path.replace(os.sep, '/')})"
+                return f"![{alt}]({path.replace(os.sep, '/')})" + note
             return ""
 
         # ---- assemble document markdown, per-page markdown and blocks ----
