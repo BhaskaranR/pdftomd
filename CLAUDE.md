@@ -47,7 +47,8 @@ Response shape and block fields are documented in README.md.
 Spreadsheets: found by URL path/file name → Content-Type → bytes (PDF bytes always win). Output must stay
 byte-equal to anydoc's (visible sheets only, `## name` only when >1, header row guessed, number formats,
 ISO dates). Extras: `include_hidden`, `filename`, unsaved-formula count in `data.warning`, `charts` (off by
-default: chart caches → tables; default output must stay byte-equal to anydoc). PDF options ignored;
+default: chart caches → tables; no cache → the cells its c:f points at, hidden rows/cols left out unless
+plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). PDF options ignored;
 `parsers: []` → base64 in `markdown`. Errors carry `code`: `SPREADSHEET_TOO_LARGE|ENCRYPTED|UNSUPPORTED|UNREADABLE`.
 
 ## Rules when changing code
@@ -85,5 +86,5 @@ default: chart caches → tables; default output must stay byte-equal to anydoc)
    multi-column) through the same step.
 3. Wingdings/symbol-font arrows (e.g. rank up/down) come out as unreadable glyphs; needs the font name from a real file.
 4. `chunk()` for embeddings: split by heading path, keep tables/code whole, attach page number and bbox.
-5. Spreadsheets: .xls, .xlsb, .ods (anydoc reads all three in-house). Pictures in workbooks → vision step.
-   Charts with no saved numbers could be filled from the cells their formulas point at.
+5. Spreadsheets: .xls, .xlsb, .ods (anydoc reads all three in-house; .xls parked 2026-10-26 until real files need it).
+   Pictures in workbooks → vision step.

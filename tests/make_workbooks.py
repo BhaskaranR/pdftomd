@@ -51,20 +51,21 @@ def _pts(vals):
 
 
 def _str_ref(vals, f="Sheet1!$A$1"):
-    return f"<c:strRef><c:f>{f}</c:f><c:strCache>{_pts(vals)}</c:strCache></c:strRef>"
+    cache = "" if vals is None else f"<c:strCache>{_pts(vals)}</c:strCache>"
+    return f"<c:strRef><c:f>{text(f)}</c:f>{cache}</c:strRef>"
 
 
 def _num_ref(vals, fmt="General", f="Sheet1!$B$1"):
     cache = "" if vals is None else (f"<c:numCache><c:formatCode>{text(fmt)}</c:formatCode>{_pts(vals)}"
                                      "</c:numCache>")
-    return f"<c:numRef><c:f>{f}</c:f>{cache}</c:numRef>"
+    return f"<c:numRef><c:f>{text(f)}</c:f>{cache}</c:numRef>"
 
 
 def _title(t):
     if t is None:
         return ""
-    if isinstance(t, tuple):              # ("ref", formula, cached text)
-        return f'<c:title><c:tx>{_str_ref([t[2]], t[1])}</c:tx><c:overlay val="0"/></c:title>'
+    if isinstance(t, tuple):              # ("ref", formula, cached text or None = not saved)
+        return f'<c:title><c:tx>{_str_ref(None if t[2] is None else [t[2]], t[1])}</c:tx><c:overlay val="0"/></c:title>'
     return (f'<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>{text(t)}</a:t></a:r></a:p></c:rich></c:tx>'
             '<c:overlay val="0"/></c:title>')
 
@@ -72,7 +73,9 @@ def _title(t):
 def chart_xml(ch):
     """ch: {"type": bar|line|pie|scatter, "bar_dir": col|bar, "title": str | ("ref", f, text) | None,
     "auto_deleted": bool, "cat_title": str, "series": [{"name", "cats" | ("multi", leaf, outer),
-    "vals" (None = no saved numbers), "fmt", "x" (scatter), "type" (combo override)}]}"""
+    "vals" (None = no saved numbers), "fmt", "x" (scatter), "type" (combo override),
+    "name_f" / "cats_f" / "vals_f": the cells the chart points at (saved values left out when the
+    matching name / cats / vals is None)}]}"""
     groups = {}
     for k, se in enumerate(ch["series"]):
         groups.setdefault(se.get("type", ch["type"]), []).append((k, se))
@@ -80,7 +83,11 @@ def chart_xml(ch):
     for typ, sers in groups.items():
         body = ""
         for k, se in sers:
-            body += f'<c:ser><c:idx val="{k}"/><c:order val="{k}"/><c:tx>{_str_ref([se["name"]])}</c:tx>'
+            body += f'<c:ser><c:idx val="{k}"/><c:order val="{k}"/>'
+            if se.get("name_f"):
+                body += f'<c:tx>{_str_ref(None if se.get("name") is None else [se["name"]], se["name_f"])}</c:tx>'
+            elif se.get("name") is not None:
+                body += f'<c:tx>{_str_ref([se["name"]])}</c:tx>'
             if typ == "scatter":
                 body += f'<c:xVal>{_num_ref(se["x"])}</c:xVal><c:yVal>{_num_ref(se["vals"], se.get("fmt", "General"))}</c:yVal>'
             else:
@@ -92,9 +99,9 @@ def chart_xml(ch):
                     body += (f'<c:cat><c:multiLvlStrRef><c:f>Sheet1!$A$2:$B$9</c:f><c:multiLvlStrCache>'
                              f'<c:ptCount val="{len(leaf)}"/>{lv(enumerate(leaf))}{lv(outer)}'
                              '</c:multiLvlStrCache></c:multiLvlStrRef></c:cat>')
-                elif cats is not None:
-                    body += f"<c:cat>{_str_ref(cats)}</c:cat>"
-                body += f'<c:val>{_num_ref(se["vals"], se.get("fmt", "General"))}</c:val>'
+                elif cats is not None or se.get("cats_f"):
+                    body += f"<c:cat>{_str_ref(cats, se.get('cats_f', 'Sheet1!$A$1'))}</c:cat>"
+                body += f'<c:val>{_num_ref(se["vals"], se.get("fmt", "General"), se.get("vals_f", "Sheet1!$B$1"))}</c:val>'
             body += "</c:ser>"
         if typ == "bar":
             plot += (f'<c:barChart><c:barDir val="{ch.get("bar_dir", "col")}"/><c:grouping val="clustered"/>'
@@ -462,6 +469,36 @@ WORKBOOKS = {
     "checkboxes": [Sheet("Checks", {"A1": "Task", "B1": "Done", "A2": "audit", "A3": "review"},
                          checkboxes=[(1, 1, True, "Yes", False), (1, 2, None, "", False),
                                      (2, 1, True, "ghost", True), (2, 2, False, "No", False)])],
+    # Charts that saved no numbers, only the cells they point at (as scripts write them).
+    "charts_from_cells": [
+        Sheet("Report", {"A1": "Region", "B1": "Loans", "C1": "Deposits", "H1": "Loan mix",
+                         "A2": "North", "B2": fmt(10, "#,##0"), "C2": 20,
+                         "A3": "South", "B3": fmt(5, "#,##0"), "C3": 6,
+                         "A4": "East", "B4": fmt(1234.5, "#,##0.0"), "C4": 7,
+                         "D2": ("f", "B2*2", None)}, hidden_rows=(3,), charts=[
+            {"at": (6, 0), "type": "bar", "title": ("ref", "'Report'!$H$1", None), "series": [
+                {"name_f": "'Report'!$B$1", "cats_f": "'Report'!$A$2:$A$4", "vals_f": "'Report'!$B$2:$B$4",
+                 "cats": None, "vals": None},
+                {"name_f": "Report!$C$1", "cats_f": "Report!$A$2:$A$4", "vals_f": "Report!$C$2:$C$4",
+                 "cats": None, "vals": None}]},
+            {"at": (25, 0), "type": "line", "series": [
+                {"cats_f": "'Bob''s data'!$A$1:$A$3", "vals_f": "'Bob''s data'!$B$1:$B$3",
+                 "cats": None, "vals": None}]},
+            {"at": (45, 0), "type": "bar", "title": "Picked", "series": [
+                {"name_f": "'Report'!$B$1", "cats_f": "('Report'!$A$2,'Report'!$A$4)",
+                 "vals_f": "('Report'!$B$2,'Report'!$B$4)", "cats": None, "vals": None}]},
+            {"at": (65, 0), "type": "bar", "title": "External", "series": [
+                {"name": "Other", "cats_f": "[1]Other!$A$1:$A$2", "vals_f": "[1]Other!$B$1:$B$2",
+                 "cats": None, "vals": None}]},
+            {"at": (85, 0), "type": "pie", "title": "One", "series": [
+                {"name": "Deposits", "cats_f": "'Report'!$A$2", "vals_f": "'Report'!$C$2",
+                 "cats": None, "vals": None}]},
+            {"at": (105, 0), "type": "bar", "title": "Formulas", "series": [
+                {"name": "Twice", "cats_f": "'Report'!$A$2", "vals_f": "'Report'!$D$2",
+                 "cats": None, "vals": None}]},
+        ]),
+        Sheet("Bob's data", {"A1": "Q1", "B1": 1, "A2": "Q2", "B2": 2, "A3": "Q3", "B3": 3}, state="hidden"),
+    ],
 }
 
 
