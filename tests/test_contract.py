@@ -116,10 +116,12 @@ def test_parsers(pdf, png):
 
     data = open(pdf, "rb").read()
     r = scrape(pdf, parsers=[])
-    check("parsers=[]: base64 of the input, no markdown",
-          base64.b64decode(r["data"].get("base64", "")) == data and "markdown" not in r["data"])
+    # Firecrawl returns the raw file base64'd in `markdown` (engines/pdf/index.ts: html = markdown = content)
+    check("parsers=[]: the PDF base64'd in markdown",
+          base64.b64decode(r["data"].get("markdown", "")) == data and "base64" not in r["data"], list(r["data"]))
     r = scrape(pdf, parsers=["image"])
-    check("parsers=['image'] + PDF: pdf parser off -> base64", "base64" in r["data"], list(r["data"]))
+    check("parsers=['image'] + PDF: pdf parser off -> base64 in markdown",
+          base64.b64decode(r["data"].get("markdown", "")) == data, list(r["data"]))
 
     # image parser off, or not a PDF/image: Firecrawl's SCRAPE_UNSUPPORTED_FILE_ERROR
     unsupported = getattr(pdf2md, "UnsupportedFileError", None)
@@ -129,6 +131,8 @@ def test_parsers(pdf, png):
                                ("HTML, default parsers", html, None), ("HTML + []", html, []),
                                ("garbage bytes", b"\x00\x01junk", None)):
         e = raises(scrape, src, parsers=parsers)
+        if name == "HTML + []":
+            check("unsupported-file message lists JPEG 2000 and AVIF", "JPEG 2000" in str(e) and "AVIF" in str(e), str(e))
         check(f"{name}: SCRAPE_UNSUPPORTED_FILE_ERROR",
               unsupported is not None and isinstance(e, unsupported)
               and getattr(e, "code", None) == "SCRAPE_UNSUPPORTED_FILE_ERROR", repr(e))
@@ -142,6 +146,18 @@ def test_parsers(pdf, png):
         e = raises(scrape, pdf, parsers=bad)
         check(f"parsers={bad!r} rejected", isinstance(e, ValueError), repr(e))
 
+    # pdf options are checked for every input, like Firecrawl's schema
+    for bad in ([{"type": "pdf", "maxPages": 0}, "image"], [{"type": "pdf", "refresh": True}, "image"],
+                [{"type": "pdf", "pages": "yes"}, "image"]):
+        e = raises(scrape, png, parsers=bad)
+        check(f"image input, bad pdf option {bad[0]!r} rejected", isinstance(e, ValueError)
+              and not isinstance(e, getattr(pdf2md, "UnsupportedFileError", ())), repr(e))
+    # two pdf parsers: the first one counts (Firecrawl's getPDF* use parsers.find)
+    d = scrape(pdf, parsers=[{"type": "pdf", "pages": True}, {"type": "pdf"}])["data"]
+    check("two pdf parsers: the first one's options apply", len(d.get("pages") or []) == 3, list(d))
+    e = raises(scrape, pdf, parsers=["pdf", {"type": "pdf", "maxPages": 0}])
+    check("two pdf parsers: the second is still validated", isinstance(e, ValueError), repr(e))
+
 
 # ---- pdf parser options ----
 
@@ -154,7 +170,9 @@ def test_pdf_options(pdf):
     m = scrape(pdf, parsers=[{"type": "pdf", "maxPages": 2}])["data"]["metadata"]
     check("maxPages=2: numPages 2, totalPages 3", (m.get("numPages"), m.get("totalPages")) == (2, 3), m)
     check("maxPages=10000 accepted", raises(scrape, pdf, parsers=[{"type": "pdf", "maxPages": 10000}]) is None)
-    for bad in (0, -1, "2", True, 2.5, 10001, None):
+    m = scrape(pdf, parsers=[{"type": "pdf", "maxPages": 2.0}])["data"]["metadata"]
+    check("maxPages=2.0 (JSON number) accepted as 2", m.get("numPages") == 2, m)
+    for bad in (0, -1, "2", True, 2.5, 10001, None, float("inf")):
         e = raises(scrape, pdf, parsers=[{"type": "pdf", "maxPages": bad}])
         check(f"maxPages={bad!r} rejected", isinstance(e, ValueError), repr(e))
 
@@ -214,6 +232,10 @@ def test_pdf_options(pdf):
             e = raises(scrape, pdf, parsers=[{"type": "pdf", opt: bad}])
             check(f"{opt}={bad!r} rejected, named", isinstance(e, ValueError) and opt in str(e), repr(e))
         check(f"{opt}=False accepted", raises(scrape, pdf, parsers=[{"type": "pdf", opt: False}]) is None)
+
+    for bad in ("x", None, 1):
+        e = raises(scrape, pdf, parsers=[{"type": "pdf", "pageMarkdown": bad}])
+        check(f"pageMarkdown={bad!r} rejected, named", isinstance(e, ValueError) and "pageMarkdown" in str(e), repr(e))
 
     # deprecated alias, folded into pages; explicit pages wins
     d = scrape(pdf, parsers=[{"type": "pdf", "pageMarkdown": True}])["data"]
@@ -346,6 +368,63 @@ def test_routing():
     check_ocr("scan with a native header: body OCR'd", "Crates received" in d["markdown"], d["markdown"])
 
 
+# ---- CLI and tools ----
+
+def cli(*args):
+    import subprocess
+    r = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "pdf2md.py"), *args],
+                       capture_output=True, text=True)
+    return r.returncode, r.stdout, r.stderr
+
+
+def test_cli_and_tools(pdf):
+    import json
+    png = scan_png(SCAN_LINES, "cli_scan.png")
+    scanned = make_pdf("cli_scanned.pdf", [full_image(png)])
+    code, out, err = cli(scanned, "--mode", "fast")
+    check("CLI error shows its code", code == 1 and "SCRAPE_PDF_OCR_REQUIRED" in err, (code, err[-200:]))
+    code, out, err = cli(scanned, "--mode", "fast", "--json")
+    try:
+        j = json.loads(out)
+    except ValueError:
+        j = {}
+    check("CLI --json error: {success: false, code, error}", code == 1 and j.get("success") is False
+          and j.get("code") == "SCRAPE_PDF_OCR_REQUIRED" and j.get("error"), (code, out[-200:], err[-200:]))
+    code, out, err = cli("--help")
+    check("--help mentions prepare and merge", "prepare" in out and "merge" in out, out[-400:])
+
+    enc = os.path.join(TMP, "enc.pdf")
+    c = canvas.Canvas(enc, encrypt="secret123")
+    c.drawString(72, 700, "Encrypted body text.")
+    c.save()
+    code, out, err = cli("prepare", enc, os.path.join(TMP, "w_enc"))
+    check("prepare on an encrypted PDF: error message, no traceback",
+          code == 1 and "Traceback" not in err and "password" in err, err[-300:])
+    code, out, err = cli("prepare", enc, os.path.join(TMP, "w_enc2"), "--password", "secret123")
+    check("prepare with --password works", code == 0, err[-300:])
+    code, out, err = cli("merge", os.path.join(TMP, "no_such_work"))
+    check("merge on a missing work folder: error message, no traceback",
+          code == 1 and "Traceback" not in err and err.startswith("error:"), err[-300:])
+    code, out, err = cli("prepare", os.path.join(TMP, "missing.pdf"), os.path.join(TMP, "w_miss"))
+    check("prepare on a missing file: error message, no traceback",
+          code == 1 and "Traceback" not in err and err.startswith("error:"), err[-300:])
+
+    import subprocess
+    tool = os.path.join(os.path.dirname(HERE), "make_skill.py")
+    victim = os.path.join(TMP, "precious")
+    os.makedirs(victim, exist_ok=True)
+    open(os.path.join(victim, "notes.txt"), "w").write("keep me")
+    r = subprocess.run([sys.executable, tool, "--out", victim], capture_output=True, text=True)
+    check("make_skill refuses to replace a folder that isn't a built skill",
+          r.returncode != 0 and os.path.exists(os.path.join(victim, "notes.txt")), (r.returncode, r.stderr[-200:]))
+    out_dir = os.path.join(TMP, "skill_out")
+    r1 = subprocess.run([sys.executable, tool, "--out", out_dir], capture_output=True, text=True)
+    r2 = subprocess.run([sys.executable, tool, "--out", out_dir], capture_output=True, text=True)
+    check("make_skill builds, and rebuilds over its own output",
+          r1.returncode == 0 and r2.returncode == 0 and os.path.exists(os.path.join(out_dir, "scripts", "pdf2md.py")),
+          (r1.stderr[-200:], r2.stderr[-200:]))
+
+
 # ---- PDF header detection (isPdfBuffer.test.ts) ----
 
 def test_header():
@@ -380,6 +459,7 @@ if __name__ == "__main__":
     test_pdf_options(pdf)
     test_response(pdf)
     test_routing()
+    test_cli_and_tools(pdf)
     test_header()
     if not pdf2md.ocr_available():
         print("Tesseract not installed: OCR checks skipped")

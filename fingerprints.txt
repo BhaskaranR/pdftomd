@@ -100,13 +100,15 @@ d5a7e4ae postprocess_fragment
 eccff5ef union_box
 79bd14d3 norm_bbox
 569feb68 PDFOCRRequiredError
-1e434dca UnsupportedFileError
+dd4c64f8 UnsupportedFileError
 5528f080 PAGE_MARKER
 2744c51f load_source
 6ac30a0a convert
 35a99978 is_pdf_buffer
-0e4d6a1c _parser_opts
-edb3bab3 scrape
+16384e3e PDF_OPTIONS
+f3d66931 _pdf_options
+52941aa0 _parser_opts
+7c286b09 scrape
 f02a1535 VISION_DOC
 12634071 MIN_PICTURE_PT
 52ffc8dd SCAN_DPI
@@ -133,5 +135,6 @@ c784404e _ocr_text
 2107f7fd _split_pages
 501816d5 merge
 b7686859 summary
-165276d9 vision_main
-c02c49d2 main
+b8b7de89 vision_main
+edacb556 error_text
+0300159e main
