@@ -83,7 +83,8 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 | Headings H1–H4 | Font-size tiers vs. body size (≥1.2×, sizes within 0.5pt share a tier), bold fallback, base-size correction — ported from `markdown/analysis.rs` |
 | Paragraphs | Line grouping, paragraph breaks by spacing / short last line / indent, de-hyphenation |
 | Bold, italic, links | From font names and link annotations |
-| Lists | Bullets (incl. unmapped bullet glyphs), `1.` `1)` `(a)` markers, hanging-indent numbers, wrapped items |
+| Lists | Bullets (incl. unmapped bullet glyphs), `1.` `1)` `(a)` markers, hanging-indent numbers, wrapped items; a tick `✓ Done` stays in the item |
+| Symbol fonts | Symbol and ZapfDingbats read through their own encodings (`αβγ`, `✓✔`, `→`); Word's private-use symbol codes decoded — bullets `•`, Symbol Greek, Wingdings 1–3 checkboxes and arrows (`🞏 ☑ ☒ 🡹 🡻`, Unicode's mapping). Other fonts' private-use codes follow pdf-inspector (plain letters) |
 | Code | Monospace lines → fenced blocks with indentation kept |
 | Tables | Ruled/boxed tables from drawn lines, then borderless tables from text alignment; lists and two-column prose are rejected. A header row just above a banded (shaded) table is attached to it; a header + one row counts as a table when the header is underlined |
 | Side-by-side tables | Independent blocks next to each other (e.g. two tables exported from one spreadsheet, sharing a row grid) are split into regions when their rule lines stop at the gutter, and each region is read on its own |
@@ -233,6 +234,7 @@ python tests/test_layout.py                  # side-by-side tables, charts, and 
 python tests/test_contract.py                # Firecrawl options and PDF detection
 python tests/test_sheet.py                   # spreadsheets: Firecrawl sample + anydoc cases + synthetic set
 python tests/test_chunk.py                   # chunks for embeddings
+python tests/test_fonts.py                   # symbol fonts (Symbol, ZapfDingbats, Wingdings, Word private-use codes)
 python tests/compare_anydoc.py               # sheet2md vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
