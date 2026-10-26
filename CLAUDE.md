@@ -7,7 +7,8 @@ Heuristics are ported from Firecrawl's MIT-licensed `pdf-inspector` Rust crate
 ## Layout
 - `pdf2md.py` — everything: extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
-  scanned pages; number check against page text/OCR). Keep it one file. `skill/` = SKILL.md + scripts copy.
+  scanned pages; number check against page text/OCR). Keep it one file. `skill/SKILL.md` = the skill's instructions; `python make_skill.py` builds the
+  installable folder in `dist/pdf-to-markdown/` (SKILL.md + scripts/pdf2md.py copy). Never commit a copy of pdf2md.py.
   Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
 - `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` — per-function fingerprints for checking a retyped copy.
 - `tests/make_samples.py` — builds `tests/samples/report.pdf` and `scanned.pdf` (needs reportlab).
@@ -52,6 +53,6 @@ Response shape and block fields are documented in README.md.
 1. LICENSE (owner to choose; MIT suggested) + NOTICE crediting Firecrawl's MIT notice.
 2. Done for charts/pictures/scans via `pdf2md.py prepare`/`merge` (the office runs skills + MCP only, so the agent's
    model reads the images; no API calls from Python). Not yet: sending hard *text* pages (complex tables,
-   multi-column) through the same step. Keep skill/scripts/pdf2md.py identical to the root file.
+   multi-column) through the same step.
 3. Wingdings/symbol-font arrows (e.g. rank up/down) come out as unreadable glyphs; needs the font name from a real file.
 4. `chunk()` for embeddings: split by heading path, keep tables/code whole, attach page number and bbox.

@@ -102,7 +102,15 @@ python pdf2md.py merge work/ -o report.md   # every number checked against page 
 ```
 
 Numbers not found in the page's own text are marked ⚠; values read off a drawing are written `~42`.
-Missing answers keep the plain pdf2md output. `skill/` is a ready skill folder (SKILL.md + scripts).
+Missing answers keep the plain pdf2md output.
+
+To install it as an agent skill, build the skill folder (SKILL.md + a copy of `pdf2md.py`):
+
+```bash
+python make_skill.py          # -> dist/pdf-to-markdown/   (--zip for a .zip)
+```
+
+Only `skill/SKILL.md` is kept in git; there is one `pdf2md.py` to edit.
 Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped without it).
 
 ## Limits
