@@ -568,6 +568,38 @@ def header_ruled(first, second, rules) -> bool:
     return False
 
 
+PROSE_RUN_ON = 0.5        # share of row-to-row cell pairs that continue a sentence
+PROSE_MAX_DIGITS = 0.1    # prose has few numbers; tables of text cells don't run on
+
+
+def runs_on_like_prose(rows_lines, segs_of) -> bool:
+    """Columns of prose look like a table to text alignment (narrow columns give short
+    segments). In prose each column's text runs on into the next row: the next segment
+    starts lowercase, or the previous one doesn't end a sentence. Table cells don't."""
+    cols = defaultdict(list)                 # words per segment, by column position
+    for ln in rows_lines:
+        sg = segs_of(ln)
+        if len(sg) >= 2:
+            for k, x in enumerate(sg):
+                cols[k].append(len(x))
+    if not cols or min(sum(v) / len(v) for v in cols.values()) < 3:
+        return False                         # a column of markers or short cells: not prose
+    pairs = cont = 0
+    for a, b in zip(rows_lines, rows_lines[1:]):
+        sa, sb = segs_of(a), segs_of(b)
+        if len(sa) != len(sb) or len(sa) < 2:
+            continue
+        for x, y in zip(sa, sb):
+            pairs += 1
+            first = next((ch for ch in y[0].text if ch.isalpha()), "")
+            ends = x[-1].text.rstrip()[-1:] in ".:;!?"
+            cont += bool(first.islower() or (not ends and first and y[0].text[:1].isalpha()
+                                              and len(x) >= 4 and len(y) >= 4))
+    words = [w for ln in rows_lines for w in ln.words]
+    digits = sum(1 for w in words if any(ch.isdigit() for ch in w.text)) / max(len(words), 1)
+    return pairs >= 4 and cont >= PROSE_RUN_ON * pairs and digits < PROSE_MAX_DIGITS
+
+
 def heuristic_tables(lines, page_width, rules=()) -> list:
     """Text-alignment tables (tables/detect_heuristic.rs, simplified):
     ≥3 consecutive rows whose cell segments leave consistent vertical
@@ -642,6 +674,9 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
         if markerish == len(firsts) and all(len(segments(l)) == 2 for l in rows_lines):
             i = best_j + 1
             continue  # a list with hanging indents, not a table
+        if runs_on_like_prose(rows_lines, segs_of):
+            i = best_j + 1                   # columns of prose: skip it whole, no tail "tables"
+            continue
         if avg_words > 6 or len(rows_lines) < min_rows:
             i += 1
             continue
@@ -1207,20 +1242,53 @@ def split_at(line, x) -> list:
     return parts
 
 
-def reading_order(items, x0, x1=None) -> list:
+def spans_gutter(line, gutter) -> bool:
+    """A full-width line whose word space happens to fall on the gutter: the gap there is an
+    ordinary space, not the white space between two columns."""
+    left = [w.x1 for w in line.words if (w.x0 + w.x1) / 2 < gutter]
+    right = [w.x0 for w in line.words if (w.x0 + w.x1) / 2 >= gutter]
+    return bool(left and right) and min(right) - max(left) <= max(4.0, 0.6 * line.size)
+
+
+def fills_columns(lines, lo, gutter, hi) -> bool:
+    """A nested gutter splits real columns only if the text on both sides fills its column
+    (a key/value list inside one column has short segments on both sides)."""
+    def fill(parts, width):
+        ws = sorted(p.x1 - p.x0 for p in parts if len(p.words) >= 3)
+        return bool(ws) and ws[len(ws) // 2] >= 0.6 * width
+    left = [p for l in lines if l.kind == "text" for p in split_at(l, gutter) if p.x1 <= gutter + 1]
+    right = [p for l in lines if l.kind == "text" for p in split_at(l, gutter) if p.x0 >= gutter - 1]
+    if not left or not right:
+        return False
+    # measured to where the text ends (the page margin is not part of a column)
+    return fill(left, gutter - max(lo, min(p.x0 for p in left))) and \
+        fill(right, min(hi, max(p.x1 for p in right)) - gutter)
+
+
+def reading_order(items, x0, x1=None, depth=0) -> list:
     """Order lines + block items (tables/images). Two-column regions are read
-    left column then right column; full-width items act as separators.
+    left column then right column; full-width items act as separators; each side is
+    checked for another gutter (up to three columns).
     Scans x0..x1 for the gutter (reading_order(items, page_width) = whole page)."""
+    lo, hi = (0.0, x0) if x1 is None else (x0, x1)
     gutter = find_gutter(items, x0, x1)
+    if gutter is not None and depth and not fills_columns(items, lo, gutter, hi):
+        gutter = None
     items = sorted(items, key=lambda l: (l.top, l.x0))
     if gutter is None:
         set_colw([l for l in items if l.kind == "text"])
         return items, False
     out, left, right = [], [], []
 
+    def side(part, a, b):
+        part = sorted(part, key=lambda l: l.top)
+        if depth < 1 and sum(1 for l in part if l.kind == "text") >= 8:
+            return reading_order(part, a, b, depth + 1)[0]
+        return part
+
     def flush():
-        out.extend(sorted(left, key=lambda l: l.top))
-        out.extend(sorted(right, key=lambda l: l.top))
+        out.extend(side(left, lo, gutter))
+        out.extend(side(right, gutter, hi))
         left.clear()
         right.clear()
 
@@ -1234,7 +1302,7 @@ def reading_order(items, x0, x1=None) -> list:
             else:
                 right.append(it)
             continue
-        if any(w.x0 < gutter < w.x1 for w in it.words):
+        if any(w.x0 < gutter < w.x1 for w in it.words) or spans_gutter(it, gutter):
             flush()
             out.append(it)
             continue

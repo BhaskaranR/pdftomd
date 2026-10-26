@@ -49,7 +49,10 @@ bb2d635e column_gaps
 164b1936 MAX_TABLE_SCAN_ROWS
 cc104ce8 add_interval
 cd1a1d68 header_ruled
-f646bd2e heuristic_tables
+20a6cea1 PROSE_RUN_ON
+354a5b1f PROSE_MAX_DIGITS
+14c4da6c runs_on_like_prose
+1320301f heuristic_tables
 2b42393b page_images
 3070c80e render_region
 4202ef54 save_image
@@ -75,7 +78,9 @@ d6bec067 rule_spans_columns
 25954202 region_of
 da2d5a2e find_gutter
 05c03f7d split_at
-72fa1251 reading_order
+cf1ec254 spans_gutter
+454ce672 fills_columns
+cd6043c0 reading_order
 c778cfbe set_colw
 19496748 normalize_for_comparison
 ffdd2ab4 is_structural
