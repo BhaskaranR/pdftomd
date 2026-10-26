@@ -91,8 +91,21 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
    model reads the images; no API calls from Python), and hard *text* pages (tables, columns) via opt-in
    `prepare --hard-pages` (PR #6).
 3. Done: symbol fonts (Symbol/ZapfDingbats built-in encodings; Word's private-use symbol codes; Wingdings 1-3 via
-   Unicode's mapping, beyond pdf-inspector, which turns them into letters). Not yet: embedded TrueType fonts that
-   name glyphs only inside the font program (pdf-inspector `glyph_names_in_embedded_fonts.pdf`).
+   Unicode's mapping, beyond pdf-inspector, which turns them into letters).
 4. Done: `chunk()` for embeddings (`chunk2md.py`; `scrape(chunk=…)`, `--chunks`).
-5. Spreadsheets: .xls, .xlsb, .ods (anydoc reads all three in-house; .xls parked 2026-10-26 until real files need it).
-   Pictures in workbooks → vision step.
+5. Spreadsheets: .xls, .xlsb (anydoc reads both in-house; .xls parked 2026-10-26 until real files need it —
+   relevant if broker-vote exports come from older systems). Pictures in workbooks → vision step.
+
+Found by running Firecrawl's public test files (64 files; 18 compared with pdf-inspector's snapshots, 2026-10-26),
+ranked for the office's documents — mostly broker votes (equity, FICC): tables of brokers, scores, ranks, footnotes:
+6. Superscripts are flattened into the text, so footnote marks stick to numbers: `8.4¹` → `8.41`, `H₂O` → `H2O`
+   (pdf-inspector writes `<sup>…</sup>` / Unicode superscripts; see its `author_block_superscripts` snapshot).
+   Highest priority: a silent wrong value in scorecard tables.
+7. Password-protected PDF through `scrape()`: the error message is empty (`PdfminerException:`). The CLI already
+   says "pass --password" and works with it; make `scrape()` raise the same clear error.
+8. Lower: side-by-side prose or a sidebar next to body text is sometimes read as a 2-column table (pdf-inspector
+   `real-estate-pricing`, `thermo-freon12`).
+
+Won't do (user, 2026-10-26; not relevant to broker votes — don't propose): embedded TrueType fonts that name glyphs
+only inside the font program (pdf-inspector `glyph_names_in_embedded_fonts.pdf`); Hebrew/Arabic reading order;
+`.ods` support.
