@@ -118,4 +118,7 @@ b3a6c4c2 _records
 e18150b5 EXT_OF
 a3072d18 spreadsheet_ext
 b4a4aa52 convert
-68b11cc9 main
+0cfd8f6a main
+a3f20c3b _fingerprints
+cc642faa verify
+f645341a FINGERPRINTS

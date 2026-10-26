@@ -285,6 +285,9 @@ chunk = chunk_markdown
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--verify"]:
+        sys.exit(verify())
     ap = argparse.ArgumentParser(description="Cut a markdown file into chunks for embeddings (JSON).")
     ap.add_argument("src", help="markdown file, or - for stdin")
     ap.add_argument("--chunk-size", type=int, default=CHUNK_MAX_CHARS, metavar="N",
@@ -296,6 +299,90 @@ def main(argv=None):
     except ValueError as e:
         sys.exit(f"error: {e}")
     sys.stdout.write(json.dumps(out, ensure_ascii=False, indent=2) + "\n")
+
+
+# ---- transcription check -----------------------------------------------------------------------
+# After this file is copied out of a PDF (or retyped), `python3 <this file> --verify` compares every
+# function and constant with the fingerprints below; whitespace and comments don't count, any change
+# to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
+
+def _fingerprints(src):
+    """['<8 hex> <name>'] for each top-level function, class and constant, in file order."""
+    import ast
+    import hashlib
+    import io as _io
+    import tokenize
+    lines = src.splitlines(keepends=True)
+    skip = {"COMMENT", "NL", "NEWLINE", "ENDMARKER"}
+    out = []
+    for node in ast.parse(src).body:
+        if not isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Assign)):
+            continue
+        name = getattr(node, "name", None) or getattr(node.targets[0], "id", None)
+        if not name or name == "FINGERPRINTS":
+            continue
+        seg = lines[node.lineno - 1:node.end_lineno]
+        toks, depth, start = [], 0, None
+        for t in tokenize.generate_tokens(_io.StringIO("".join(seg)).readline):
+            kind = tokenize.tok_name[t.type]
+            if kind == "FSTRING_START":          # Python 3.12+: rebuild the whole f-string
+                depth += 1
+                start = start or t.start
+            elif kind == "FSTRING_END":
+                depth -= 1
+                if depth == 0:
+                    (r0, c0), (r1, c1) = start, t.end
+                    text = "".join(seg[r0 - 1:r1])[c0:len("".join(seg[r0 - 1:r1 - 1])) + c1]
+                    toks.append("STRING:" + text)
+                    start = None
+            elif depth == 0 and kind not in skip:
+                toks.append(kind + ":" + t.string)
+        out.append(hashlib.sha256("\x00".join(toks).encode()).hexdigest()[:8] + " " + name)
+    return out
+
+
+def verify(path=None):
+    """Compare this file's code with FINGERPRINTS; print the result, return 0 if all match."""
+    import os
+    path = path or __file__
+    try:
+        have = _fingerprints(open(path, encoding="utf-8").read())
+    except SyntaxError as e:
+        print(f"{os.path.basename(path)}: does not parse at line {e.lineno} (check indentation there)")
+        return 1
+    want = FINGERPRINTS.split()
+    want = [f"{want[i]} {want[i + 1]}" for i in range(0, len(want), 2)]
+    differ = [w.split()[1] for w in want if w not in have] + \
+        [h.split()[1] + " (not in the list)" for h in have if h not in want]
+    name = os.path.basename(path)
+    if differ:
+        print(f"{name}: {len(differ)} differ: " + ", ".join(dict.fromkeys(differ)))
+        return 1
+    print(f"{name}: all {len(want)} functions and constants match")
+    return 0
+
+
+FINGERPRINTS = """
+9259cd33 CHUNK_MAX_CHARS
+a266394f CHUNK_MIN_CHARS
+8901fa45 _MD_HEADING
+60c24695 _MD_LIST
+a4335ded _MD_CHART
+3d10b7f2 _MD_PAGE
+4f590e1d _MD_TABLE_RULE
+27c143a9 _SENTENCE_END
+136a1219 _UNIT_TYPE
+b12f2607 check_size
+d6dcbed1 _md_units
+d18f4cb3 _split_paragraph
+d091b840 _split_table
+da623149 _chunk_text
+13ffa77a chunk_markdown
+e4aecbbf chunk
+915dcf73 main
+a3f20c3b _fingerprints
+cc642faa verify
+"""
 
 
 if __name__ == "__main__":

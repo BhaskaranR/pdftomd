@@ -2145,6 +2145,9 @@ def convert(src, include_hidden: bool = False, ext: Optional[str] = None, charts
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--verify"]:
+        return verify()
     ap = argparse.ArgumentParser(description="Spreadsheet (xlsx, xlsm, csv) -> Markdown, like Firecrawl.")
     ap.add_argument("src")
     ap.add_argument("-o", "--output")
@@ -2164,6 +2167,194 @@ def main(argv=None):
     else:
         sys.stdout.write(r.markdown)
     return 0
+
+
+# ---- transcription check -----------------------------------------------------------------------
+# After this file is copied out of a PDF (or retyped), `python3 <this file> --verify` compares every
+# function and constant with the fingerprints below; whitespace and comments don't count, any change
+# to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
+
+def _fingerprints(src):
+    """['<8 hex> <name>'] for each top-level function, class and constant, in file order."""
+    import ast
+    import hashlib
+    import io as _io
+    import tokenize
+    lines = src.splitlines(keepends=True)
+    skip = {"COMMENT", "NL", "NEWLINE", "ENDMARKER"}
+    out = []
+    for node in ast.parse(src).body:
+        if not isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Assign)):
+            continue
+        name = getattr(node, "name", None) or getattr(node.targets[0], "id", None)
+        if not name or name == "FINGERPRINTS":
+            continue
+        seg = lines[node.lineno - 1:node.end_lineno]
+        toks, depth, start = [], 0, None
+        for t in tokenize.generate_tokens(_io.StringIO("".join(seg)).readline):
+            kind = tokenize.tok_name[t.type]
+            if kind == "FSTRING_START":          # Python 3.12+: rebuild the whole f-string
+                depth += 1
+                start = start or t.start
+            elif kind == "FSTRING_END":
+                depth -= 1
+                if depth == 0:
+                    (r0, c0), (r1, c1) = start, t.end
+                    text = "".join(seg[r0 - 1:r1])[c0:len("".join(seg[r0 - 1:r1 - 1])) + c1]
+                    toks.append("STRING:" + text)
+                    start = None
+            elif depth == 0 and kind not in skip:
+                toks.append(kind + ":" + t.string)
+        out.append(hashlib.sha256("\x00".join(toks).encode()).hexdigest()[:8] + " " + name)
+    return out
+
+
+def verify(path=None):
+    """Compare this file's code with FINGERPRINTS; print the result, return 0 if all match."""
+    import os
+    path = path or __file__
+    try:
+        have = _fingerprints(open(path, encoding="utf-8").read())
+    except SyntaxError as e:
+        print(f"{os.path.basename(path)}: does not parse at line {e.lineno} (check indentation there)")
+        return 1
+    want = FINGERPRINTS.split()
+    want = [f"{want[i]} {want[i + 1]}" for i in range(0, len(want), 2)]
+    differ = [w.split()[1] for w in want if w not in have] + \
+        [h.split()[1] + " (not in the list)" for h in have if h not in want]
+    name = os.path.basename(path)
+    if differ:
+        print(f"{name}: {len(differ)} differ: " + ", ".join(dict.fromkeys(differ)))
+        return 1
+    print(f"{name}: all {len(want)} functions and constants match")
+    return 0
+
+
+FINGERPRINTS = """
+6e5982bf MAX_ENTRY_BYTES
+1b1b8c70 MAX_TOTAL_BYTES
+0c6b55f3 MAX_ENTRY_COUNT
+7a1d1ddc MAX_GRID_SLOTS
+da7d00c5 MAX_EXPANSION
+6c00b713 MAX_ROWS
+ee4b7893 MAX_COLS
+a463c93b OLE_MAGIC
+14b8c7f9 SML_NS
+e8785935 REL_NS
+baa287c3 VML_NS
+1f5f3f76 CHART_NS
+b7f3fa78 DML_NS
+7da55228 XDR_NS
+dac1fcc5 X_VML_NS
+c053ad6d SheetError
+3b593b7f Result
+38dc8a4e rust_round
+c984a432 clean_text
+46969ee9 collapse_ws
+6955a67c rust_display
+11db4b36 format_float
+f7910353 format_time_of_day
+c4cd3c2e format_duration_days
+87d54724 BUILTIN
+7b5043cb COLORS
+686786d4 _push_literal
+b680c21f _decoration
+97059b33 _split_sections
+0617faff _date_parts
+31afcf7e _Spec
+48d6097b _bracket
+05da0bf5 _parse_section
+b9f81d56 _resolve_number
+0dfce300 _cond_matches
+01ff5da4 _select
+945da83b _split_digits
+1f19ac52 _places
+b25ad82e _assign
+32b34da3 _emit
+ae9e48e7 _render_scientific
+80f19d4f _best_fraction
+77e5e3bc _render_fraction
+d40d9de1 _render_number
+b30ffe16 NumberFormat
+3cc711dd _days_from_civil
+d3c30b8c _civil_from_days
+67c1a337 render_serial
+db4a5985 render_number
+b9ba96f5 format_as_text
+1954e06e SAMPLE_ROWS
+72828014 MAX_LABEL
+824515d4 _is_number
+9a6c801b _digit_groups
+552ebb3b _is_temporal
+3a71c6cf classify
+13786613 _dominant
+5d8229a0 _plain
+56f17b5f header_rows
+4898bf52 _run_end
+054f24ec DELIM_SLOT
+2ebfce01 ASCII_PUNCT
+4ddb0b96 _can_close
+455b7448 _can_close_math
+a7e005b1 _partner_slot
+21ab7d3c _closers
+a7541640 _entity_ahead
+a7b95b49 escape_text
+b68734a1 render_parts
+9bc52679 render_cell
+c0aa5e96 _is_empty
+295c644e render_table
+430532c8 document
+146224ca _local
+7a8d31c5 _ns
+cea15670 _is
+9d57767e _children
+d0c857ed _child
+2e500fcd _descendants
+fdaff0a7 _attr
+460daa22 _rel_id
+0bef33a5 _text
+3eea1798 Package
+8d30cc17 rels_part_for
+bd298342 resolve
+b955d979 _rel_of_type
+c091fa45 parse_ref
+ca26c528 parse_region
+0735248d bool_attr
+0c779139 rich_text
+67075697 Styles
+2711654e cell_text
+e3d5e652 SheetContent
+26fdaa3b read_sheet
+ea626ab3 read_vml_checkboxes
+7eba1ec1 _expand_ranges
+2be2e740 _first_visible
+158a526f build_table
+a680bf63 parse_xlsx
+e1e8a1c1 CHART_KIND
+2e605647 _cval
+990df8d7 _ref_area
+9c5e939e chart_ref_areas
+5e11c736 _ref_values
+0daa8c98 _chart_text
+e2145035 _cache_points
+4f9954c1 _point_count
+13eb43bc _from_cells
+d52b4fec _axis_values
+14107afc read_chart
+e6890da7 chart_block
+6effc5da sheet_charts
+13facfed _decode
+b3a6c4c2 _records
+8dc2e9f6 sniff_delimiter
+38450b20 parse_csv
+32254683 CONTENT_TYPE_OF
+e18150b5 EXT_OF
+a3072d18 spreadsheet_ext
+b4a4aa52 convert
+0cfd8f6a main
+a3f20c3b _fingerprints
+cc642faa verify
+"""
 
 
 if __name__ == "__main__":

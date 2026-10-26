@@ -14,4 +14,7 @@ d091b840 _split_table
 da623149 _chunk_text
 13ffa77a chunk_markdown
 e4aecbbf chunk
-857cfef1 main
+915dcf73 main
+a3f20c3b _fingerprints
+cc642faa verify
+8d24ae31 FINGERPRINTS

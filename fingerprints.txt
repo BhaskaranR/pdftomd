@@ -170,4 +170,7 @@ cdb7a88b word_check
 b7686859 summary
 b5ee0cf8 vision_main
 b1a7a5f3 error_text
-cf2b1cea main
+f6f870b1 main
+a3f20c3b _fingerprints
+cc642faa verify
+ca585aa5 FINGERPRINTS
