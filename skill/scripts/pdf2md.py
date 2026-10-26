@@ -260,6 +260,25 @@ def image_coverage(page) -> float:
 
 SCAN_COVERAGE = 0.8          # an image this big is treated as a page scan
 SCAN_MAX_NATIVE_CHARS = 300  # ...unless the page also carries this much real text
+SCAN_MIN_INK = 0.0005        # ...or the image is a plain background (share of marked pixels)
+INK_DPI = 36
+
+
+def image_ink(page) -> float:
+    """Share of the page's pixels that the images mark, with the native text
+    painted out: a plain or faint background is ~0, a scan of text is not."""
+    from PIL import ImageDraw
+    img = page.to_image(resolution=INK_DPI).original.convert("L")
+    hist = img.histogram()
+    bg = max(range(256), key=hist.__getitem__)
+    k, (x0, y0) = INK_DPI / 72, page.bbox[:2]
+    d = ImageDraw.Draw(img)
+    for c in page.chars:
+        d.rectangle(((c["x0"] - x0) * k - 1, (c["top"] - y0) * k - 1,
+                     (c["x1"] - x0) * k + 1, (c["bottom"] - y0) * k + 1), fill=bg)
+    hist = img.histogram()
+    marked = sum(n for v, n in enumerate(hist) if abs(v - bg) > 48)
+    return marked / (img.width * img.height or 1)
 
 
 def page_stats(page) -> dict:
@@ -268,7 +287,9 @@ def page_stats(page) -> dict:
           "hybrid" - scan image plus a little native text (e.g. a typed header):
                      native text is kept and the scan is OCR'd
           "scan"   - no usable text, needs OCR
-          "blank"  - nothing on the page"""
+          "blank"  - nothing on the page
+    A little native text on a plain background image (a cover title, a
+    letterhead) is "text": there is nothing in the image to OCR."""
     chars = sum(1 for c in page.chars if not c["text"].isspace())
     cov = image_coverage(page)
     has_graphics = bool(page.images) or len(page.curves) > 20
@@ -279,6 +300,8 @@ def page_stats(page) -> dict:
     elif chars < MIN_TEXT_CHARS_PER_PAGE and cov >= 0.5:
         kind = "hybrid"
     else:
+        kind = "text"
+    if kind == "hybrid" and image_ink(page) < SCAN_MIN_INK:
         kind = "text"
     return {"kind": kind, "chars": chars, "coverage": cov}
 

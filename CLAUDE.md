@@ -15,7 +15,8 @@ Heuristics are ported from Firecrawl's MIT-licensed `pdf-inspector` Rust crate
 - `tests/out/report.md`, `report.json` — expected output for the sample report.
 
 ## Pipeline (in order)
-1. Page routing per page: text / hybrid (scan + a little native text) / scan / blank. Document type TextBased / Scanned / ImageBased / Mixed / Empty.
+1. Page routing per page: text / hybrid (scan + a little native text) / scan / blank. A little native text on a
+   plain background image (no ink once the text is painted out, `image_ink`) is text, not hybrid. Document type TextBased / Scanned / ImageBased / Mixed / Empty.
 2. Words → lines (page-relative coordinates via `page.bbox`).
 3. Tables: ruled (`find_tables`, lines strategy) then borderless (text alignment).
 4. Vector charts detected (filled shapes) and saved as images only — never converted to numbers (tried;

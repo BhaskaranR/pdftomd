@@ -33,7 +33,10 @@ cb4b19d9 parse_pages
 c85d3580 image_coverage
 7dbb9b40 SCAN_COVERAGE
 c3d57613 SCAN_MAX_NATIVE_CHARS
-abb99ca4 page_stats
+3f2f69d5 SCAN_MIN_INK
+b3c18517 INK_DPI
+b52576e0 image_ink
+fad40802 page_stats
 e1abee19 classify
 b26df565 page_origin
 b49fbfed extract_words

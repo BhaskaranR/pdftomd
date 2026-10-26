@@ -64,6 +64,44 @@ def text_png():
     return path
 
 
+def scan_png(lines, name, size=(1700, 2200), color="white"):
+    """A page of text drawn as pixels, like a scanner would produce."""
+    from PIL import Image, ImageDraw
+    path = os.path.join(TMP, name)
+    im = Image.new("RGB", size, color)
+    d = ImageDraw.Draw(im)
+    for i, ln in enumerate(lines):
+        d.text((150, 300 + i * 70), ln, font=font(40), fill="black")
+    im.save(path)
+    return path
+
+
+SCAN_LINES = ["Shipment Summary", "Crates received at the north dock: 118",
+              "Inspector on duty signed every manifest."]
+
+
+def make_pdf(name, pages):
+    """pages: list of callables(canvas) drawing one page each."""
+    path = os.path.join(TMP, name)
+    c = canvas.Canvas(path)
+    for draw in pages:
+        draw(c)
+        c.showPage()
+    c.save()
+    return path
+
+
+def full_image(png):
+    return lambda c: c.drawImage(png, 0, 0, *c._pagesize)
+
+
+def text_body(c, lines=12):
+    c.setFont("Helvetica", 11)
+    for i in range(lines):
+        c.drawString(72, 740 - i * 16, f"Line {i + 1} of the operations memo covers staffing, "
+                                       "shifts and the weekly schedule.")
+
+
 def scrape(src, **kw):
     return pdf2md.scrape(src, images="none", **kw)
 
@@ -157,6 +195,89 @@ def test_response(pdf):
     check("bytes input: sourceFile document.pdf", m.get("sourceFile") == "document.pdf", m)
 
 
+# ---- scan / OCR routing (parse-fire-pdf.test.ts, pdf-inspector OCR routing) ----
+
+def test_routing():
+    png = scan_png(SCAN_LINES, "scan.png")
+    scanned = make_pdf("scanned.pdf", [full_image(png)])
+    mixed = make_pdf("mixed.pdf", [text_body, full_image(png)])
+    pale = scan_png([], "pale.png", color="#f2f2f2")
+    watermark = make_pdf("watermark.pdf", [lambda c: (full_image(pale)(c), text_body(c))])
+    cover = make_pdf("cover.pdf", [lambda c: (full_image(pale)(c), c.setFont("Helvetica-Bold", 28),
+                                              c.drawString(72, 600, "Quarterly Operations Review"))])
+    from PIL import Image
+    grad = os.path.join(TMP, "gradient.png")
+    Image.linear_gradient("L").resize((850, 1100)).point(lambda v: 255 - v // 8).convert("RGB").save(grad)
+    gradient = make_pdf("gradient.pdf", [lambda c: (full_image(grad)(c), c.setFont("Helvetica-Bold", 28),
+                                                    c.drawString(72, 600, "Quarterly Operations Review"))])
+    sparse_png = scan_png(["Received 118 crates"], "sparse.png")
+    sparse = make_pdf("sparse_scan.pdf", [lambda c: (full_image(sparse_png)(c), c.setFont("Helvetica", 9),
+                                                     c.drawString(72, 812, "Northwind Freight - Internal"))])
+    header = make_pdf("header_scan.pdf", [lambda c: (full_image(png)(c), c.setFont("Helvetica", 9),
+                                                     c.drawString(72, 812, "Northwind Freight - Internal"))])
+
+    e = raises(scrape, scanned, parsers=[{"type": "pdf", "mode": "fast"}])
+    check("fast + scanned PDF: SCRAPE_PDF_OCR_REQUIRED",
+          isinstance(e, pdf2md.PDFOCRRequiredError) and e.code == "SCRAPE_PDF_OCR_REQUIRED", repr(e))
+    check("fast + scanned PDF: message names auto/ocr", e is not None and '"auto"' in str(e) and '"ocr"' in str(e))
+
+    r = scrape(mixed, parsers=[{"type": "pdf", "mode": "fast"}])
+    d = r["data"]
+    check("fast + mixed PDF: no error, text page kept", "Line 1 of the operations memo" in d["markdown"])
+    check("fast + mixed PDF: scan page skipped, not OCR'd", "Crates" not in d["markdown"])
+    check("fast + mixed PDF: warning names the skipped page", "[2]" in d.get("warning", ""), d.get("warning"))
+
+    r = scrape(scanned)
+    d = r["data"]
+    check("auto + scanned: pdfType Scanned", d["metadata"].get("pdfType") == "Scanned", d["metadata"])
+    check_ocr("auto + scanned: OCR text", "Crates received" in d.get("markdown", ""), d.get("markdown"))
+    check_ocr("auto + scanned: OCR'd page listed in pagesNeedingOcr",
+              d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])
+
+    real = pdf2md.ocr_available
+    pdf2md.ocr_available = lambda: False
+    try:
+        d = scrape(scanned)["data"]
+    finally:
+        pdf2md.ocr_available = real
+    check("auto + scanned, no Tesseract: success with a warning",
+          "Tesseract" in d.get("warning", ""), d.get("warning"))
+
+    r = scrape(mixed)
+    md = r["data"]["markdown"]
+    check("auto + mixed: pdfType Mixed", r["data"]["metadata"].get("pdfType") == "Mixed", r["data"]["metadata"])
+    check_ocr("auto + mixed: text page native, scan page OCR'd",
+              "Line 1 of the operations memo" in md and "Crates received" in md, md)
+
+    d = scrape(watermark)["data"]
+    check("text page with a background image: TextBased, not OCR'd",
+          d["metadata"].get("pdfType") == "TextBased" and not d["metadata"].get("pagesNeedingOcr"), d["metadata"])
+    check("text page with a background image: text once",
+          d["markdown"].count("Line 1 of the operations memo") == 1, d["markdown"])
+
+    d = scrape(cover)["data"]
+    check("short cover page on a background image: not OCR'd",
+          not d["metadata"].get("pagesNeedingOcr"), d["metadata"])
+    check("short cover page on a background image: title once",
+          d["markdown"].count("Quarterly Operations Review") == 1, d["markdown"])
+
+    d = scrape(gradient, parsers=[{"type": "pdf", "mode": "fast"}])["data"]
+    check("title on a faint gradient background: text page, fast mode works",
+          d["metadata"].get("pdfType") == "TextBased" and "Quarterly Operations Review" in d["markdown"], d["metadata"])
+    e = raises(scrape, cover, parsers=[{"type": "pdf", "mode": "fast"}])
+    check("short cover page on a background image: fast mode works", e is None, repr(e))
+
+    d = scrape(sparse)["data"]
+    check("sparse scan (one line) with a native header: still needs OCR",
+          d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])
+    check_ocr("sparse scan with a native header: line OCR'd", "118 crates" in d["markdown"], d["markdown"])
+
+    d = scrape(header)["data"]
+    check("scan with a native header: page needs OCR", d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])
+    check("scan with a native header: header kept", "Northwind Freight" in d["markdown"], d["markdown"])
+    check_ocr("scan with a native header: body OCR'd", "Crates received" in d["markdown"], d["markdown"])
+
+
 # ---- PDF header detection (isPdfBuffer.test.ts) ----
 
 def test_header():
@@ -190,6 +311,7 @@ if __name__ == "__main__":
     test_parsers(pdf, png)
     test_pdf_options(pdf)
     test_response(pdf)
+    test_routing()
     test_header()
     if not pdf2md.ocr_available():
         print("Tesseract not installed: OCR checks skipped")
