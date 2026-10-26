@@ -95,14 +95,14 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 ## Spreadsheets (xlsx, xlsm, csv)
 
 Same output as Firecrawl, which converts spreadsheets with its MIT-licensed
-[`anydoc`](https://github.com/firecrawl/anydoc) crate; `sheet2md.py` is a port of its sheet and CSV
+[`anydoc`](https://github.com/firecrawl/anydoc) crate; section 13 of `pdf2md.py` is a port of its sheet and CSV
 readers (standard library only). `scrape()` and the CLI pick it automatically — from the URL path or
 file name, then the Content-Type, then the file's bytes — so the same calls work:
 
 ```bash
 python pdf2md.py budget.xlsx -o budget.md
 python pdf2md.py https://site.com/export.csv
-python sheet2md.py budget.xlsx --include-hidden      # spreadsheet-only CLI
+python pdf2md.py budget.xlsx --include-hidden       # keep hidden sheets, rows and columns
 python pdf2md.py budget.xlsx --charts                # also print chart data as tables
 ```
 
@@ -150,7 +150,7 @@ OCR on JPEG scans sometimes misreads a digit (`17.5` as `1735`); the model's cor
 flagged ⚠, never passed silently.
 Missing answers keep the plain pdf2md output.
 
-To install it as an agent skill, build the skill folder (SKILL.md + copies of `pdf2md.py` and `sheet2md.py`):
+To install it as an agent skill, build the skill folder (SKILL.md + a copy of `pdf2md.py`):
 
 ```bash
 python make_skill.py          # -> dist/pdf-to-markdown/   (--zip for a .zip)
@@ -178,7 +178,7 @@ python pdf2md.py tests/samples/report.pdf -o tests/out/report.md
 python tests/test_layout.py                  # side-by-side tables, charts, and must-not-change cases
 python tests/test_contract.py                # Firecrawl options and PDF detection
 python tests/test_sheet.py                   # spreadsheets: Firecrawl sample + anydoc cases + synthetic set
-python tests/compare_anydoc.py               # sheet2md vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
+python tests/compare_anydoc.py               # spreadsheets vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
 
@@ -193,6 +193,5 @@ diff fingerprints.txt mine.txt     # no output = identical code
 
 Each line is a fingerprint of one function or constant. Whitespace and comments
 don't count; any change to code, numbers, or regexes does. Works the same on
-Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots. `fingerprints_sheet.txt` is the list for
-`sheet2md.py`.
+Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots.
 If nearly every line differs, recheck `verify_transcription.py` itself first.

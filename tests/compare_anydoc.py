@@ -1,4 +1,4 @@
-"""Compare sheet2md with Firecrawl's own converter (anydoc, built locally from tests/anyref).
+"""Compare pdf2md's spreadsheet converter (section 13) with Firecrawl's own converter (anydoc, built locally from tests/anyref).
 No API key and no upload: both run on this machine.
 Run: cargo build --release --manifest-path tests/anyref/Cargo.toml
      python tests/compare_anydoc.py [--save] [files...]   (default: the synthetic set)
@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 import make_workbooks  # noqa: E402
-import sheet2md  # noqa: E402
+import pdf2md  # noqa: E402
 
 ANYREF = os.path.join(HERE, "anyref", "target", "release", "anyref")
 OUT = os.path.join(HERE, "out", "workbooks")
@@ -32,8 +32,8 @@ def main(argv):
         ext = os.path.splitext(path)[1].lower()
         ref = subprocess.run([ANYREF, path, ext], capture_output=True)
         try:
-            ours = sheet2md.convert(path).markdown.encode()
-        except sheet2md.SheetError as e:
+            ours = pdf2md.convert_sheet(path).markdown.encode()
+        except pdf2md.SheetError as e:
             ours = f"ERROR {e.code}".encode()
         if ref.returncode != 0:
             print(f"anydoc error  {os.path.basename(path)}: {ref.stderr.decode().strip()}  (ours: {ours[:60]!r})")

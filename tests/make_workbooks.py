@@ -1,4 +1,4 @@
-"""Synthetic workbooks (invented data) for comparing sheet2md with Firecrawl's converter (anydoc).
+"""Synthetic workbooks (invented data) for comparing pdf2md's spreadsheet converter with Firecrawl's converter (anydoc).
 Written as raw SpreadsheetML so saved formula values, checkboxes and 1904 dates can be set
 exactly. Deterministic: same bytes every run.
 Run: python tests/make_workbooks.py tests/samples/workbooks"""

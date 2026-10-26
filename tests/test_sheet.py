@@ -8,8 +8,9 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-import sheet2md  # noqa: E402
-from sheet2md import NumberFormat, SheetError, convert, render_serial  # noqa: E402
+import pdf2md  # noqa: E402
+from pdf2md import NumberFormat, SheetError, render_serial  # noqa: E402
+from pdf2md import convert_sheet as convert  # noqa: E402
 
 RESULTS = []
 
@@ -183,10 +184,10 @@ def values():
     for v, want in [(0.0000004, "0.0000004"), (12.0, "12"), (1.5, "1.5"),
                     (3554.7000000000003, "3554.7"), (5649.5599999999995, "5649.56"),
                     (346_289_529.491_800_1, "346289529.4918"), (1.0, "1"), (1e20, "100000000000000000000")]:
-        eq(f"format_float {v}", sheet2md.format_float(v), want)
-    eq("time of day", sheet2md.format_time_of_day(32_694.184 / 86_400.0), "09:04:54")
-    eq("duration", sheet2md.format_duration_days((26 * 3600 + 30 * 60 + 15) / 86_400.0), "26:30:15")
-    eq("negative duration", sheet2md.format_duration_days(-0.5), "-12:00:00")
+        eq(f"format_float {v}", pdf2md.format_float(v), want)
+    eq("time of day", pdf2md.format_time_of_day(32_694.184 / 86_400.0), "09:04:54")
+    eq("duration", pdf2md.format_duration_days((26 * 3600 + 30 * 60 + 15) / 86_400.0), "26:30:15")
+    eq("negative duration", pdf2md.format_duration_days(-0.5), "-12:00:00")
     d = (True, False, False)
     eq("serial 59", render_serial(59.0, d, False), "1900-02-28")
     eq("serial 60 (fake leap day)", render_serial(60.0, d, False), "60")
@@ -200,7 +201,7 @@ def values():
 # ---------------------------------------------------------------- header guess (header.rs)
 def header():
     def detect(rows):
-        return sheet2md.header_rows([[[("text", t)] for t in r] for r in rows])
+        return pdf2md.header_rows([[[("text", t)] for t in r] for r in rows])
     eq("labels over numbers", detect([["name", "qty"], ["a", "1"], ["b", "2"]]), 1)
     eq("labels over date/bool", detect([["when", "ok"], ["2026-03-15", "TRUE"], ["2026-03-16", "FALSE"]]), 1)
     eq("numeric first row", detect([["36", "12", "aka"], ["173", "57", "aka"], ["306", "220", "aka"]]), 0)
@@ -219,7 +220,7 @@ def header():
                     ("NaN", "text"), ("2026-03-15", "date"), ("15/03/2026 09:04", "date"),
                     ("2026-03-15T09:04:54.123Z", "date"), ("26:30:15", "date"), ("yes", "bool"),
                     ("  ", None)]:
-        eq(f"classify {v!r}", sheet2md.classify(v), want)
+        eq(f"classify {v!r}", pdf2md.classify_value(v), want)
 
 
 # ---------------------------------------------------------------- workbook reading (xlsx.rs)
@@ -353,11 +354,11 @@ def sheets():
 
 # ---------------------------------------------------------------- CSV (csv.rs)
 def csv_tests():
-    eq("sniff ;", sheet2md.sniff_delimiter('a;b;c\n"1,5";"2,5";x\n"3,0";y;z\n'), ";")
-    eq("sniff ,", sheet2md.sniff_delimiter("a,b,c\n1,2,3\n"), ",")
-    eq("sniff tab", sheet2md.sniff_delimiter("a\tb\n1\t2\n"), "\t")
+    eq("sniff ;", pdf2md.sniff_delimiter('a;b;c\n"1,5";"2,5";x\n"3,0";y;z\n'), ";")
+    eq("sniff ,", pdf2md.sniff_delimiter("a,b,c\n1,2,3\n"), ",")
+    eq("sniff tab", pdf2md.sniff_delimiter("a\tb\n1\t2\n"), "\t")
     long_field = '"' + "\n".join(["line"] * 30) + '"'
-    eq("sniff multiline field", sheet2md.sniff_delimiter(f"a;b;c\n{long_field};2;3\nx;y;z\n"), ";")
+    eq("sniff multiline field", pdf2md.sniff_delimiter(f"a;b;c\n{long_field};2;3\nx;y;z\n"), ";")
     eq("csv basic", md(b"Name,Price\niPhone,1000\niPad,800\n", ext=".csv"),
        "| Name | Price |\n| --- | --- |\n| iPhone | 1000 |\n| iPad | 800 |\n")
     eq("csv utf-16", md(b"\xff\xfe" + "x,y\ncafé,90\n".encode("utf-16-le"), ext=".csv"),
@@ -374,7 +375,7 @@ def routing():
     import tempfile
     import pdf2md
 
-    ext = sheet2md.spreadsheet_ext
+    ext = pdf2md.spreadsheet_ext
     eq("detect: url extension", ext("https://x.com/files/q3.XLSX?dl=1"), ".xlsx")
     eq("detect: extension mid-path", ext("https://x.com/q3.csv/download"), ".csv")
     eq("detect: content-type", ext("https://x.com/export", "text/csv; charset=utf-8"), ".csv")
@@ -390,7 +391,7 @@ def routing():
     eq("scrape: xlsx bytes -> markdown", r["data"].get("markdown"), table)
     m = r["data"]["metadata"]
     eq("scrape: metadata", (m.get("contentType"), m.get("numSheets"), m.get("sheetNames")),
-       (sheet2md.CONTENT_TYPE_OF[".xlsx"], 1, ["Stock"]))
+       (pdf2md.CONTENT_TYPE_OF[".xlsx"], 1, ["Stock"]))
     check("scrape: no pdf fields", "pdfType" not in m, m)
     raw = pdf2md.scrape(xl, parsers=[])
     eq("scrape: parsers [] -> base64", base64.b64decode(raw["data"].get("base64", "")), xl)
@@ -409,7 +410,7 @@ def routing():
         b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + "EncryptionInfo".encode("utf-16-le"),
         filename="locked.xlsx")), "SPREADSHEET_ENCRYPTED")
 
-    tmp = tempfile.mkdtemp(prefix="sheet2md_")
+    tmp = tempfile.mkdtemp(prefix="sheets_")
     csv_path = os.path.join(tmp, "stock.csv")
     with open(csv_path, "wb") as f:
         f.write(b"item,qty\npen,3\n")
@@ -516,10 +517,6 @@ def charts_tests():
     with contextlib.redirect_stdout(out):
         pdf2md.main([path, "--charts"])
     eq("cli --charts", out.getvalue(), CHARTS_MD)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        sheet2md.main([path, "--charts"])
-    eq("sheet2md cli --charts", out.getvalue(), CHARTS_MD)
 
     chart = {"at": (0, 3), "type": "bar", "title": "Hidden chart", "series": [
         {"name": "n", "cats": ["a"], "vals": [1]}]}

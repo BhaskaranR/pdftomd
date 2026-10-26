@@ -3,7 +3,7 @@
 Single-file PDF → Markdown converter (`pdf2md.py`) with a Firecrawl-compatible API.
 Heuristics are ported from Firecrawl's MIT-licensed `pdf-inspector` Rust crate
 (https://github.com/firecrawl/pdf-inspector) and rebuilt on pdfplumber.
-Spreadsheets (xlsx, xlsm, csv) go through `sheet2md.py`, a port of Firecrawl's MIT-licensed `anydoc`
+Spreadsheets (xlsx, xlsm, csv) go through section 13 of `pdf2md.py`, a port of Firecrawl's MIT-licensed `anydoc`
 crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOSSARY.md`.
 
 ## Layout
@@ -12,12 +12,12 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   scanned pages; number check against page text/OCR). Keep it one file. `skill/SKILL.md` = the skill's instructions; `python make_skill.py` builds the
   installable folder in `dist/pdf-to-markdown/` (SKILL.md + scripts/pdf2md.py copy). Never commit a copy of pdf2md.py.
   Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
-- `sheet2md.py` — spreadsheets: zip+XML reader (stdlib only), number formats, header-row guess, GFM tables, CSV,
-  opt-in chart tables. `convert()`, CLI. Separate file for now; `make_skill.py` ships it next to pdf2md.py. Tests: `tests/test_sheet.py`.
+  Section 13 = spreadsheets (port of anydoc): zip+XML reader (stdlib only), number formats, header-row guess,
+  GFM tables, CSV, opt-in chart tables. Entry `convert_sheet()` (`SheetResult`); names that clash with the PDF side
+  carry a sheet name (`convert_sheet`, `SheetResult`, `classify_value`). Tests: `tests/test_sheet.py`.
 - `tests/make_workbooks.py` — synthetic workbooks + CSVs; `tests/out/workbooks/*.md` = anydoc's output for them.
-  `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs sheet2md against it.
-- `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` (pdf2md.py), `fingerprints_sheet.txt`
-  (sheet2md.py) — per-function fingerprints for checking a retyped copy.
+  `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs section 13 against it.
+- `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` — per-function fingerprints for checking a retyped copy.
 - `tests/make_samples.py` — builds `tests/samples/report.pdf` and `scanned.pdf` (needs reportlab).
 - `tests/fonts.py` — `font()` for drawing synthetic scans (DejaVu on Linux, Arial/Times on macOS).
 - `tests/out/report.md`, `report.json` — expected output for the sample report.
@@ -56,8 +56,7 @@ default: chart caches → tables; default output must stay byte-equal to anydoc)
   - `python tests/test_sheet.py` (must print all passed)
 - Any code change invalidates the fingerprints: regenerate with
   `python verify_transcription.py pdf2md.py > fingerprints.txt` and rebuild `fingerprints_2col.txt`
-  (first half left, second half right, left column padded to its widest entry + 2);
-  `python verify_transcription.py sheet2md.py > fingerprints_sheet.txt`.
+  (first half left, second half right, left column padded to its widest entry + 2).
 - Don't change thresholds without a test that shows the improvement.
 
 ## Decisions

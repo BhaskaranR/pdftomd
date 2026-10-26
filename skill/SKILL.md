@@ -66,7 +66,7 @@ install hint without it, because every number is checked against OCR text.
 
 ## Spreadsheets (xlsx, xlsm, csv)
 
-No image step; `scripts/pdf2md.py` hands the file to `scripts/sheet2md.py` next to it. Run:
+No image step. Run:
 
 ```
 python scripts/pdf2md.py <input.xlsx> -o <output.md>

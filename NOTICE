@@ -4,7 +4,7 @@ pdf2md.py
   Heuristics ported from Firecrawl's pdf-inspector
   https://github.com/firecrawl/pdf-inspector
 
-sheet2md.py
+pdf2md.py, section 13 (spreadsheets)
   Port of the spreadsheet, CSV, header-row and table-rendering code in anydoc
   (src/formats/sheet, src/formats/csv.rs, src/shared/header.rs, src/render/markdown)
   https://github.com/firecrawl/anydoc
