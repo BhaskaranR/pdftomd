@@ -66,7 +66,10 @@ af20d9fe _shape
 d6d51ee2 _bbox
 791e5c90 _union
 58e5e4be _cv
-2d1904a4 vector_figures
+63fa2cb7 BAR_BASE_TOL
+6cca5053 BAR_LEN_CV
+251cdb54 one_colour_bars
+eee12ad6 vector_figures
 d924216f _OCR_WARNED
 9a508bc9 ocr_blocks
 d17fc54d detect_rotation

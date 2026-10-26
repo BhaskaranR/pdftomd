@@ -550,6 +550,39 @@ def test_demo_three_columns():
     check("demo p4: marked as a column page", 4 in r.pages_with_columns, r.pages_with_columns)
 
 
+def test_demo_single_colour_chart():
+    pages, r = demo_pages()
+    md = pages[3]
+    figs = [it for pg in r.blocks if pg["pageNumber"] == 3 for it in pg["items"] if it["type"] == "figure"]
+    check("demo p3: one-colour vector bar chart saved as a figure", len(figs) == 1, figs)
+    ok, where = in_order(md, ["Figure 3: Fund assets", "](", "Returns are net of fees"])
+    check("demo p3: chart image after its title, before the footnote", ok, where)
+    check("demo p3: chart labels stay in the text", all(x in md for x in ("Alpha", "Delta")), md[-400:])
+    check("demo p3: both side-by-side tables still tables",
+          "| Alpha Growth | 12,400 | 8.2% |" in md and "| AAA | 14 | 11.2% |" in md, md[:600])
+
+
+def rating_squares(path):
+    """Same-colour rating squares in a row of text (5-star style): marks, not a chart."""
+    c = canvas.Canvas(path, pagesize=(W, H))
+    c.setFont("Helvetica", 10)
+    y = H - 100
+    for k, (name, n) in enumerate((("Service", 4), ("Value", 3), ("Speed", 5), ("Support", 2))):
+        c.drawString(72, y - 24 * k, name)
+        c.setFillColor(colors.HexColor("#2F5597"))
+        for j in range(n):
+            c.rect(160 + j * 16, y - 24 * k - 2, 11, 11, fill=1, stroke=0)
+        c.setFillColor(colors.black)
+    c.drawString(72, y - 120, "Ratings from the client survey, one square per point.")
+    c.save()
+    return path
+
+
+def test_rating_squares_not_chart():
+    r = run(rating_squares(os.path.join(OUT, "rating_squares.pdf")))
+    check("rating squares: no figure invented", not figure_blocks(r), figure_blocks(r))
+
+
 def text_table(path):
     """A borderless table of short capitalised text cells: a table, not prose."""
     c = canvas.Canvas(path, pagesize=(W, H))
@@ -689,6 +722,8 @@ if __name__ == "__main__":
     test_text_table_stays()
     test_marker_list_kept()
     test_label_columns_not_split()
+    test_demo_single_colour_chart()
+    test_rating_squares_not_chart()
     test_mixed_page()
     test_rotated_scans()
     test_scorecard("aligned")

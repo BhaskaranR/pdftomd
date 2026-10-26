@@ -846,6 +846,31 @@ def _cv(vals) -> float:
     return statistics.pstdev(vals) / m if m else 0.0
 
 
+BAR_BASE_TOL = 1.0     # pt: bars of one chart stand on one baseline
+BAR_LEN_CV = 0.1       # their lengths differ (rating squares and cell fills don't)
+
+
+def one_colour_bars(ms, axes, words) -> bool:
+    """A one-series bar chart: >= 3 marks on a shared baseline with lengths that vary, next to an
+    axis line or numeric tick labels. (Two or more colours already count as a chart.)"""
+    for base, length in (("bottom", lambda m: m["bottom"] - m["top"]),      # vertical bars
+                         ("x0", lambda m: m["x1"] - m["x0"])):              # horizontal bars
+        ref = statistics.median(m[base] for m in ms)
+        bars = [m for m in ms if abs(m[base] - ref) <= BAR_BASE_TOL]
+        if len(bars) < 3 or _cv([length(m) for m in bars]) <= BAR_LEN_CV:
+            continue
+        box = _bbox(bars)
+        near = lambda b: b["x0"] <= box[2] + 30 and b["x1"] >= box[0] - 30 and \
+            b["top"] <= box[3] + 30 and b["bottom"] >= box[1] - 30
+        if any(near(a) for a in axes):
+            return True
+        ticks = [w for w in words if re.fullmatch(r"-?\d[\d,.]*%?", w.text) and
+                 near({"x0": w.x0, "x1": w.x1, "top": w.top, "bottom": w.bottom})]
+        if len(ticks) >= 3:
+            return True
+    return False
+
+
 def vector_figures(page, words, ox, oy) -> list:
     """Charts drawn with vector graphics, as boxes (page-relative) to save as
     pictures. Reading numbers out of chart drawings isn't reliable across PDFs
@@ -913,7 +938,7 @@ def vector_figures(page, words, ox, oy) -> list:
         clusters[find(i)].append(marks[i])
     figs = []
     for ms in clusters.values():
-        if len(ms) < 3 or len({m["ck"] for m in ms}) < 2:
+        if len(ms) < 3 or (len({m["ck"] for m in ms}) < 2 and not one_colour_bars(ms, axes, words)):
             continue
         box = _bbox(ms)
         if (box[2] - box[0]) * (box[3] - box[1]) < 1200:
