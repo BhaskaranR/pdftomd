@@ -70,5 +70,6 @@ python scripts/pdf2md.py <input.xlsx> -o <output.md>
 
 Each visible sheet becomes one table, headed `## <sheet name>` when there is more than one.
 Hidden sheets, rows and columns are left out; add `--include-hidden` to keep them.
+Add `--charts` to also print each Excel chart's saved numbers as a table under its sheet.
 Report to the user any `warning:` line it prints (for example, formula cells that had no
 saved value and came out blank) and any `error:` line, word for word.

@@ -96,6 +96,7 @@ file name, then the Content-Type, then the file's bytes — so the same calls wo
 python pdf2md.py budget.xlsx -o budget.md
 python pdf2md.py https://site.com/export.csv
 python sheet2md.py budget.xlsx --include-hidden      # spreadsheet-only CLI
+python pdf2md.py budget.xlsx --charts                # also print chart data as tables
 ```
 
 ```python
@@ -115,7 +116,8 @@ resp["data"].get("warning")  # e.g. formula cells with no saved value
 | Values | Saved formula results; number formats applied (`$1,234.50`, `7.5%`, `(2,500.00)`); dates as `2026-03-15`; 15 significant digits |
 | Formulas with no saved value | Blank, and counted in `warning` (not in Firecrawl) — common in files written by scripts; re-save in Excel to fill them |
 | CSV | Separator (`,` `;` tab `|`) and encoding (UTF-8, UTF-16, Windows-1252) detected |
-| Not converted | Charts and pictures inside workbooks. PDF options (`mode`, `pages`, `blocks`, `pageMarkers`, `maxPages`) are ignored; `parsers: []` still returns base64 |
+| Charts | Ignored by default, like Firecrawl. `charts=True` / `--charts` (not in Firecrawl) adds each chart under its sheet's table: `**Chart: <title>** (column)` and a table of categories × series, copied from the numbers the chart saved (no guessing). Charts with no saved numbers (common in files written by scripts) print `: no saved values` and a warning |
+| Not converted | Pictures inside workbooks. PDF options (`mode`, `pages`, `blocks`, `pageMarkers`, `maxPages`) are ignored; `parsers: []` still returns base64 |
 | Errors | `SPREADSHEET_TOO_LARGE` (over 4,000,000 cells across the workbook), `SPREADSHEET_ENCRYPTED` (password-protected), `SPREADSHEET_UNSUPPORTED` (.xls, .xlsb — not yet), `SPREADSHEET_UNREADABLE` |
 
 Tests: `python tests/test_sheet.py`. Checked byte-for-byte against Firecrawl's own converter (anydoc 0.2.4,

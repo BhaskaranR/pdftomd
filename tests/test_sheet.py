@@ -427,6 +427,112 @@ def routing():
     check("cli: --json response", '"numSheets": 1' in out.getvalue(), out.getvalue()[:200])
 
 
+# ---------------------------------------------------------------- charts (opt-in; not in Firecrawl)
+CHARTS_MD = """## Loans
+
+|  |  |  |
+| --- | --- | --- |
+| Branch | 2025 | 2026 |
+| North | 10 | 12 |
+| South | 8 | 9 |
+
+**Chart: Growth rate** (line)
+
+|  | growth |
+| --- | --- |
+| North | 10.5% |
+| South | 20.0% |
+
+**Chart: Loans by branch** (column)
+
+| Branch | 2025 | 2026 |
+| --- | --- | --- |
+| North | 10 | 12 |
+| South | 8 | 9 |
+
+## Mix
+
+**Chart: Share** (pie)
+
+|  | Share |
+| --- | --- |
+| A | 50% |
+| B | 30% |
+| C | 20% |
+
+**Chart 2** (column + line)
+
+|  | Units | Rate |
+| --- | --- | --- |
+| Q1 | 5 | 0.1 |
+| Q2 | 7 | 0.2 |
+| Q3 |  | 0.3 |
+
+**Chart: Fit** (scatter)
+
+| X | Y1 | Y2 |
+| --- | --- | --- |
+| 1 | 2 | 1 |
+| 2 | 4 |  |
+| 3 | 6 | 9 |
+
+**Chart: Regions** (column)
+
+|  | Loans |
+| --- | --- |
+| North / Branch A | 1 |
+| North / Branch B | 2 |
+| South / Branch C | 3 |
+
+**Chart: Stale** (column): no saved values
+
+## Dashboard
+
+**Chart: Totals** (column)
+
+|  | Total |
+| --- | --- |
+| North | 22 |
+| South | 17 |
+"""
+
+
+def charts_tests():
+    import contextlib
+    import tempfile
+    sys.path.insert(0, HERE)
+    import make_workbooks as mw
+    import pdf2md
+    tmp = tempfile.mkdtemp(prefix="charts_")
+    path = os.path.join(tmp, "charts.xlsx")
+    mw.build(path, mw.WORKBOOKS["charts"])
+    with open(os.path.join(HERE, "out", "workbooks", "charts.xlsx.md"), encoding="utf-8") as f:
+        eq("charts off: same as Firecrawl", md(path), f.read())
+    r = convert(path, charts=True)
+    eq("charts on: tables in sheet order", r.markdown, CHARTS_MD)
+    eq("charts on: no-saved-values warning", r.warning, "chart 'Stale' on sheet 'Mix' has no saved values")
+    eq("scrape charts=True", pdf2md.scrape(path, charts=True)["data"]["markdown"], CHARTS_MD)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        pdf2md.main([path, "--charts"])
+    eq("cli --charts", out.getvalue(), CHARTS_MD)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        sheet2md.main([path, "--charts"])
+    eq("sheet2md cli --charts", out.getvalue(), CHARTS_MD)
+
+    chart = {"at": (0, 3), "type": "bar", "title": "Hidden chart", "series": [
+        {"name": "n", "cats": ["a"], "vals": [1]}]}
+    hid = os.path.join(tmp, "hidden.xlsx")
+    mw.build(hid, [mw.Sheet("Shown", {"A1": "x"}), mw.Sheet("Secret", {"A1": "y"}, state="hidden", charts=[chart])])
+    check("hidden sheet's chart left out", "Hidden chart" not in convert(hid, charts=True).markdown)
+    check("include_hidden keeps it", "**Chart: Hidden chart** (column)" in
+          convert(hid, charts=True, include_hidden=True).markdown)
+    golden_like = os.path.join(tmp, "plain.xlsx")
+    mw.build(golden_like, mw.WORKBOOKS["formats"])
+    eq("charts=True without charts changes nothing", md(golden_like, charts=True), md(golden_like))
+
+
 # ---------------------------------------------------------------- synthetic set vs Firecrawl's output
 def expected_outputs():
     """tests/out/workbooks/*.md is anydoc 0.2.4's output (tests/compare_anydoc.py --save)."""
@@ -444,7 +550,7 @@ def expected_outputs():
 
 
 if __name__ == "__main__":
-    for t in (golden, numfmt, values, header, xlsx, sheets, csv_tests, routing, expected_outputs):
+    for t in (golden, numfmt, values, header, xlsx, sheets, csv_tests, routing, expected_outputs, charts_tests):
         try:
             t()
         except Exception as e:  # a crash fails that group, not the run

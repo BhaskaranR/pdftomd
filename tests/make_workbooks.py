@@ -11,6 +11,9 @@ SML = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
 CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+XDR = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
 BUILTIN_IDS = {"0": 1, "0.00": 2, "#,##0": 3, "#,##0.00": 4, "0%": 9, "0.00%": 10, "0.00E+00": 11,
                "# ?/?": 12, "mm-dd-yy": 14, "d-mmm-yy": 15, "h:mm": 20, "m/d/yy h:mm": 22, "[h]:mm:ss": 46, "@": 49}
 
@@ -34,10 +37,103 @@ def ref_rc(ref):
 
 class Sheet:
     def __init__(self, name, cells=None, state="", hidden_rows=(), hidden_cols=(), merges=(),
-                 checkboxes=()):
+                 checkboxes=(), charts=(), chartsheet=False):
         self.name, self.cells, self.state = name, cells or {}, state
         self.hidden_rows, self.hidden_cols, self.merges = hidden_rows, hidden_cols, merges
         self.checkboxes = checkboxes      # [(col, row, checked or None, caption, hidden)]
+        self.charts = charts              # [dict, see chart_xml]
+        self.chartsheet = chartsheet      # the whole sheet is one chart (charts[0])
+
+
+def _pts(vals):
+    return f'<c:ptCount val="{len(vals)}"/>' + "".join(
+        f'<c:pt idx="{i}"><c:v>{text(str(v))}</c:v></c:pt>' for i, v in enumerate(vals) if v is not None)
+
+
+def _str_ref(vals, f="Sheet1!$A$1"):
+    return f"<c:strRef><c:f>{f}</c:f><c:strCache>{_pts(vals)}</c:strCache></c:strRef>"
+
+
+def _num_ref(vals, fmt="General", f="Sheet1!$B$1"):
+    cache = "" if vals is None else (f"<c:numCache><c:formatCode>{text(fmt)}</c:formatCode>{_pts(vals)}"
+                                     "</c:numCache>")
+    return f"<c:numRef><c:f>{f}</c:f>{cache}</c:numRef>"
+
+
+def _title(t):
+    if t is None:
+        return ""
+    if isinstance(t, tuple):              # ("ref", formula, cached text)
+        return f'<c:title><c:tx>{_str_ref([t[2]], t[1])}</c:tx><c:overlay val="0"/></c:title>'
+    return (f'<c:title><c:tx><c:rich><a:bodyPr/><a:p><a:r><a:t>{text(t)}</a:t></a:r></a:p></c:rich></c:tx>'
+            '<c:overlay val="0"/></c:title>')
+
+
+def chart_xml(ch):
+    """ch: {"type": bar|line|pie|scatter, "bar_dir": col|bar, "title": str | ("ref", f, text) | None,
+    "auto_deleted": bool, "cat_title": str, "series": [{"name", "cats" | ("multi", leaf, outer),
+    "vals" (None = no saved numbers), "fmt", "x" (scatter), "type" (combo override)}]}"""
+    groups = {}
+    for k, se in enumerate(ch["series"]):
+        groups.setdefault(se.get("type", ch["type"]), []).append((k, se))
+    plot = ""
+    for typ, sers in groups.items():
+        body = ""
+        for k, se in sers:
+            body += f'<c:ser><c:idx val="{k}"/><c:order val="{k}"/><c:tx>{_str_ref([se["name"]])}</c:tx>'
+            if typ == "scatter":
+                body += f'<c:xVal>{_num_ref(se["x"])}</c:xVal><c:yVal>{_num_ref(se["vals"], se.get("fmt", "General"))}</c:yVal>'
+            else:
+                cats = se.get("cats")
+                if isinstance(cats, tuple):
+                    _, leaf, outer = cats
+                    lv = lambda vals: "<c:lvl>" + "".join(  # noqa: E731
+                        f'<c:pt idx="{i}"><c:v>{text(v)}</c:v></c:pt>' for i, v in vals) + "</c:lvl>"
+                    body += (f'<c:cat><c:multiLvlStrRef><c:f>Sheet1!$A$2:$B$9</c:f><c:multiLvlStrCache>'
+                             f'<c:ptCount val="{len(leaf)}"/>{lv(enumerate(leaf))}{lv(outer)}'
+                             '</c:multiLvlStrCache></c:multiLvlStrRef></c:cat>')
+                elif cats is not None:
+                    body += f"<c:cat>{_str_ref(cats)}</c:cat>"
+                body += f'<c:val>{_num_ref(se["vals"], se.get("fmt", "General"))}</c:val>'
+            body += "</c:ser>"
+        if typ == "bar":
+            plot += (f'<c:barChart><c:barDir val="{ch.get("bar_dir", "col")}"/><c:grouping val="clustered"/>'
+                     f'{body}<c:axId val="1"/><c:axId val="2"/></c:barChart>')
+        elif typ == "pie":
+            plot += f'<c:pieChart><c:varyColors val="1"/>{body}</c:pieChart>'
+        elif typ == "scatter":
+            plot += f'<c:scatterChart><c:scatterStyle val="lineMarker"/>{body}<c:axId val="1"/><c:axId val="2"/></c:scatterChart>'
+        else:
+            plot += f'<c:{typ}Chart><c:grouping val="standard"/>{body}<c:axId val="1"/><c:axId val="2"/></c:{typ}Chart>'
+    if ch["type"] == "scatter":
+        plot += (f'<c:valAx><c:axId val="1"/>{_title(ch.get("cat_title"))}<c:axPos val="b"/><c:crossAx val="2"/></c:valAx>'
+                 '<c:valAx><c:axId val="2"/><c:axPos val="l"/><c:crossAx val="1"/></c:valAx>')
+    elif ch["type"] != "pie":
+        plot += (f'<c:catAx><c:axId val="1"/>{_title(ch.get("cat_title"))}<c:axPos val="b"/><c:crossAx val="2"/></c:catAx>'
+                 '<c:valAx><c:axId val="2"/><c:axPos val="l"/><c:crossAx val="1"/></c:valAx>')
+    deleted = '<c:autoTitleDeleted val="1"/>' if ch.get("auto_deleted") else ""
+    return (f'<?xml version="1.0" encoding="UTF-8"?><c:chartSpace xmlns:c="{C}" xmlns:a="{A}" xmlns:r="{R}">'
+            f'<c:chart>{_title(ch.get("title"))}{deleted}<c:plotArea><c:layout/>{plot}</c:plotArea>'
+            '<c:plotVisOnly val="1"/></c:chart></c:chartSpace>')
+
+
+def drawing_xml(charts, first_rid, absolute=False):
+    out = ""
+    for k, ch in enumerate(charts):
+        frame = (f'<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="{k + 2}" name="Chart {k + 1}"/>'
+                 '<xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>'
+                 f'</xdr:xfrm><a:graphic><a:graphicData uri="{C}"><c:chart r:id="rId{first_rid + k}"/></a:graphicData>'
+                 '</a:graphic></xdr:graphicFrame><xdr:clientData/>')
+        if absolute:
+            out += f'<xdr:absoluteAnchor><xdr:pos x="0" y="0"/><xdr:ext cx="8000000" cy="5000000"/>{frame}</xdr:absoluteAnchor>'
+        else:
+            r, c = ch["at"]
+            pos = lambda rr, cc: (f"<xdr:col>{cc}</xdr:col><xdr:colOff>0</xdr:colOff>"  # noqa: E731
+                                  f"<xdr:row>{rr}</xdr:row><xdr:rowOff>0</xdr:rowOff>")
+            out += (f'<xdr:twoCellAnchor><xdr:from>{pos(r, c)}</xdr:from><xdr:to>{pos(r + 15, c + 8)}</xdr:to>'
+                    f'{frame}</xdr:twoCellAnchor>')
+    return (f'<?xml version="1.0" encoding="UTF-8"?><xdr:wsDr xmlns:xdr="{XDR}" xmlns:a="{A}" xmlns:r="{R}" '
+            f'xmlns:c="{C}">{out}</xdr:wsDr>')
 
 
 def text(v):
@@ -96,7 +192,27 @@ def build(path, sheets, date1904=False):
         raise ValueError(v)
 
     files = {}
+    n_charts = 0
     for i, sh in enumerate(sheets, 1):
+        sheet_rels = ""
+        folder = "chartsheets" if sh.chartsheet else "worksheets"
+        if sh.charts:
+            files[f"xl/drawings/drawing{i}.xml"] = drawing_xml(sh.charts, 1, absolute=sh.chartsheet)
+            rels = ""
+            for k, ch in enumerate(sh.charts):
+                n_charts += 1
+                files[f"xl/charts/chart{n_charts}.xml"] = chart_xml(ch)
+                rels += f'<Relationship Id="rId{k + 1}" Type="{R}/chart" Target="../charts/chart{n_charts}.xml"/>'
+            files[f"xl/drawings/_rels/drawing{i}.xml.rels"] = (
+                f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{PKG}">{rels}</Relationships>')
+            sheet_rels += f'<Relationship Id="rId2" Type="{R}/drawing" Target="../drawings/drawing{i}.xml"/>'
+        if sh.chartsheet:
+            files[f"xl/chartsheets/sheet{i}.xml"] = (
+                f'<?xml version="1.0" encoding="UTF-8"?><chartsheet xmlns="{SML}" xmlns:r="{R}"><sheetViews>'
+                '<sheetView workbookViewId="0"/></sheetViews><drawing r:id="rId2"/></chartsheet>')
+            files[f"xl/chartsheets/_rels/sheet{i}.xml.rels"] = (
+                f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{PKG}">{sheet_rels}</Relationships>')
+            continue
         rows = {}
         for ref, v in sh.cells.items():
             r, c = ref_rc(ref)
@@ -115,6 +231,8 @@ def build(path, sheets, date1904=False):
         if sh.merges:
             body += f'<mergeCells count="{len(sh.merges)}">' + "".join(
                 f'<mergeCell ref="{m}"/>' for m in sh.merges) + "</mergeCells>"
+        if sh.charts:
+            body += '<drawing r:id="rId2"/>'
         if sh.checkboxes:
             body += '<legacyDrawing r:id="rId1"/>'
             shapes = ""
@@ -128,9 +246,10 @@ def build(path, sheets, date1904=False):
             files[f"xl/drawings/vmlDrawing{i}.vml"] = (
                 '<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" '
                 f'xmlns:x="urn:schemas-microsoft-com:office:excel">{shapes}</xml>')
+            sheet_rels += f'<Relationship Id="rId1" Type="{R}/vmlDrawing" Target="../drawings/vmlDrawing{i}.vml"/>'
+        if sheet_rels:
             files[f"xl/worksheets/_rels/sheet{i}.xml.rels"] = (
-                f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{PKG}"><Relationship Id="rId1" '
-                f'Type="{R}/vmlDrawing" Target="../drawings/vmlDrawing{i}.vml"/></Relationships>')
+                f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{PKG}">{sheet_rels}</Relationships>')
         files[f"xl/worksheets/sheet{i}.xml"] = (
             f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{SML}" xmlns:r="{R}">{body}</worksheet>')
 
@@ -143,8 +262,9 @@ def build(path, sheets, date1904=False):
     n = len(sheets)
     files["xl/_rels/workbook.xml.rels"] = (
         f'<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="{PKG}">'
-        + "".join(f'<Relationship Id="rId{i}" Type="{R}/worksheet" Target="worksheets/sheet{i}.xml"/>'
-                  for i in range(1, n + 1))
+        + "".join(f'<Relationship Id="rId{i}" Type="{R}/{"chartsheet" if sh.chartsheet else "worksheet"}" '
+                  f'Target="{"chartsheets" if sh.chartsheet else "worksheets"}/sheet{i}.xml"/>'
+                  for i, sh in enumerate(sheets, 1))
         + f'<Relationship Id="rId{n + 1}" Type="{R}/styles" Target="styles.xml"/>'
         + f'<Relationship Id="rId{n + 2}" Type="{R}/sharedStrings" Target="sharedStrings.xml"/></Relationships>')
     numfmts = "".join(f'<numFmt numFmtId="{fid}" formatCode="{text(code)}"/>' for code, fid in fmts.items())
@@ -170,8 +290,13 @@ def build(path, sheets, date1904=False):
         '<Default Extension="xml" ContentType="application/xml"/>'
         '<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>'
         f'<Override PartName="/xl/workbook.xml" ContentType="{sheet_ct}.sheet.main+xml"/>'
-        + "".join(f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="{sheet_ct}.worksheet+xml"/>'
-                  for i in range(1, n + 1))
+        + "".join(f'<Override PartName="/xl/chartsheets/sheet{i}.xml" ContentType="{sheet_ct}.chartsheet+xml"/>'
+                  if sh.chartsheet else
+                  f'<Override PartName="/xl/worksheets/sheet{i}.xml" ContentType="{sheet_ct}.worksheet+xml"/>'
+                  for i, sh in enumerate(sheets, 1))
+        + "".join(f'<Override PartName="/{k}" ContentType="application/vnd.openxmlformats-officedocument.'
+                  + ("drawing+xml" if "/drawings/drawing" in k else "drawingml.chart+xml") + '"/>'
+                  for k in sorted(files) if k.endswith(".xml") and ("/drawings/drawing" in k or "/charts/" in k))
         + f'<Override PartName="/xl/styles.xml" ContentType="{sheet_ct}.styles+xml"/>'
         f'<Override PartName="/xl/sharedStrings.xml" ContentType="{sheet_ct}.sharedStrings+xml"/></Types>')
 
@@ -304,6 +429,35 @@ WORKBOOKS = {
         "D215": ("is", " "),
     })],
     "one_cell": [Sheet("Only", {"C3": "lonely"})],
+    # Charts (ignored by Firecrawl; tables with charts=True). Placed out of order on purpose.
+    "charts": [
+        Sheet("Loans", {"A1": "Branch", "B1": "2025", "C1": "2026", "A2": "North", "B2": 10, "C2": 12,
+                        "A3": "South", "B3": 8, "C3": 9}, charts=[
+            {"at": (10, 0), "type": "bar", "title": "Loans by branch", "cat_title": "Branch", "series": [
+                {"name": "2025", "cats": ["North", "South"], "vals": [10, 8], "fmt": "#,##0"},
+                {"name": "2026", "cats": ["North", "South"], "vals": [12, 9], "fmt": "#,##0"}]},
+            {"at": (5, 6), "type": "line", "title": ("ref", "Loans!$H$1", "Growth rate"), "series": [
+                {"name": "growth", "cats": ["North", "South"], "vals": [0.105, 0.2], "fmt": "0.0%"}]},
+        ]),
+        Sheet("Mix", charts=[
+            {"at": (0, 0), "type": "pie", "series": [
+                {"name": "Share", "cats": ["A", "B", "C"], "vals": [0.5, 0.3, 0.2], "fmt": "0%"}]},
+            {"at": (20, 0), "type": "bar", "auto_deleted": True, "series": [
+                {"name": "Units", "cats": ["Q1", "Q2"], "vals": [5, 7]},
+                {"name": "Rate", "cats": ["Q1", "Q2", "Q3"], "vals": [0.1, 0.2, 0.3], "type": "line"}]},
+            {"at": (40, 0), "type": "scatter", "title": "Fit", "cat_title": "X", "series": [
+                {"name": "Y1", "x": [1, 2, 3], "vals": [2, 4, 6]},
+                {"name": "Y2", "x": [1, 3], "vals": [1, 9]}]},
+            {"at": (60, 0), "type": "bar", "title": "Regions", "series": [
+                {"name": "Loans", "cats": ("multi", ["Branch A", "Branch B", "Branch C"], [(0, "North"), (2, "South")]),
+                 "vals": [1, 2, 3]}]},
+            {"at": (80, 0), "type": "bar", "title": "Stale", "series": [
+                {"name": "Old", "cats": ["x"], "vals": None}]},
+        ]),
+        Sheet("Dashboard", chartsheet=True, charts=[
+            {"type": "bar", "title": "Totals", "series": [
+                {"name": "Total", "cats": ["North", "South"], "vals": [22, 17]}]}]),
+    ],
     # Form-control checkboxes: checked with caption, unchecked bare, hidden, mixed state.
     "checkboxes": [Sheet("Checks", {"A1": "Task", "B1": "Done", "A2": "audit", "A3": "review"},
                          checkboxes=[(1, 1, True, "Yes", False), (1, 2, None, "", False),

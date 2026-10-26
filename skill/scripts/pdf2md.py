@@ -2059,7 +2059,8 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
            images: Optional[str] = None, image_dir: Optional[str] = None,
            link_base: Optional[str] = None, ocr_lang: str = "eng",
            page_range: Optional[str] = None, image_dpi: int = 150,
-           include_hidden: bool = False, filename: Optional[str] = None) -> dict:
+           include_hidden: bool = False, filename: Optional[str] = None,
+           charts: bool = False) -> dict:
     """Firecrawl /scrape-compatible call for PDFs, images and spreadsheets.
     parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file as
     base64. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
@@ -2069,7 +2070,8 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     page_range "1-5,8", image_dpi, ocr_lang.
     Spreadsheets (xlsx, xlsm, csv) are found like Firecrawl does — URL path / file name,
     then Content-Type, then the bytes — and converted by sheet2md; PDF options don't apply.
-    include_hidden keeps hidden sheets/rows/columns; filename names a bytes source.
+    include_hidden keeps hidden sheets/rows/columns; charts adds each chart's saved numbers
+    as a table (not in Firecrawl); filename names a bytes source.
     """
     if images is None:
         images = "save" if image_dir else "embed"
@@ -2094,7 +2096,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     if sheet_ext:
         if parsers is not None and not parsers:
             return raw()
-        r = sheet2md.convert(data, include_hidden=include_hidden, ext=sheet_ext)
+        r = sheet2md.convert(data, include_hidden=include_hidden, ext=sheet_ext, charts=charts)
         if r.warning:
             warnings.append(r.warning)
         meta["contentType"] = sheet2md.CONTENT_TYPE_OF[sheet_ext]
@@ -2178,6 +2180,8 @@ def main(argv=None):
     ap.add_argument("--password", help="password for encrypted PDFs")
     ap.add_argument("--include-hidden", action="store_true",
                     help="spreadsheets: keep hidden sheets, rows and columns")
+    ap.add_argument("--charts", action="store_true",
+                    help="spreadsheets: add each chart's saved numbers as a table (not in Firecrawl)")
     ap.add_argument("--info", action="store_true", help="print detection info to stderr")
     a = ap.parse_args(argv)
 
@@ -2204,7 +2208,7 @@ def main(argv=None):
         resp = scrape(a.input, parsers=parsers, password=a.password, images=a.images,
                       image_dir=image_dir, link_base=out_dir, ocr_lang=a.ocr_lang,
                       page_range=a.page_range, image_dpi=a.image_dpi,
-                      include_hidden=a.include_hidden)
+                      include_hidden=a.include_hidden, charts=a.charts)
     except Exception as e:  # pdfminer wraps password / corruption errors
         msg = repr(e) + " " + repr(getattr(e, "__cause__", ""))
         if "PDFPasswordIncorrect" in msg:

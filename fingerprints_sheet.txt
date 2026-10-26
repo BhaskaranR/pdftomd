@@ -9,6 +9,9 @@ a463c93b OLE_MAGIC
 14b8c7f9 SML_NS
 e8785935 REL_NS
 baa287c3 VML_NS
+1f5f3f76 CHART_NS
+b7f3fa78 DML_NS
+7da55228 XDR_NS
 dac1fcc5 X_VML_NS
 c053ad6d SheetError
 3b593b7f Result
@@ -67,7 +70,7 @@ b68734a1 render_parts
 9bc52679 render_cell
 c0aa5e96 _is_empty
 295c644e render_table
-5b31eb8a document
+430532c8 document
 146224ca _local
 7a8d31c5 _ns
 cea15670 _is
@@ -93,7 +96,16 @@ ea626ab3 read_vml_checkboxes
 7eba1ec1 _expand_ranges
 2be2e740 _first_visible
 158a526f build_table
-8b727eac parse_xlsx
+c51902c4 parse_xlsx
+e1e8a1c1 CHART_KIND
+2e605647 _cval
+f12f2a40 _chart_text
+e2145035 _cache_points
+4f9954c1 _point_count
+122e39fd _axis_values
+0f1d6639 read_chart
+e6890da7 chart_block
+426f6e03 sheet_charts
 13facfed _decode
 b3a6c4c2 _records
 8dc2e9f6 sniff_delimiter
@@ -101,5 +113,5 @@ b3a6c4c2 _records
 32254683 CONTENT_TYPE_OF
 e18150b5 EXT_OF
 a3072d18 spreadsheet_ext
-581a322f convert
-dcbd257b main
+15031a5c convert
+68b11cc9 main
