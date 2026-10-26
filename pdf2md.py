@@ -30,6 +30,8 @@ Usage:
   python pdf2md.py https://example.com/doc.pdf -o out.md
   python pdf2md.py input.pdf --images embed       # base64 data URIs
   python pdf2md.py input.pdf --images none --pages 1-5 --ocr
+  python pdf2md.py prepare input.pdf work/       # vision step, see section 12
+  python pdf2md.py merge work/ -o out.md
 
 Library:
   from pdf2md import convert
@@ -41,6 +43,7 @@ from __future__ import annotations
 import argparse
 import base64
 import io
+import json
 import math
 import os
 import re
@@ -257,6 +260,27 @@ def image_coverage(page) -> float:
 
 SCAN_COVERAGE = 0.8          # an image this big is treated as a page scan
 SCAN_MAX_NATIVE_CHARS = 300  # ...unless the page also carries this much real text
+SCAN_MAX_MARKS = 20          # ...or the image has (almost) no marks: a plain background
+INK_DPI = 100
+
+
+def image_marks(page) -> int:
+    """Pixels (at INK_DPI) where the page has a sharp mark of its own: darker or lighter than
+    its blurred surroundings, outside the native text. A plain or gradient background has
+    none; any print, stamp or signature in a scan has many."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
+    img = page.to_image(resolution=INK_DPI).original.convert("L")
+    blur = 5
+    sharp = ImageChops.difference(img, img.filter(ImageFilter.GaussianBlur(blur))).point(
+        lambda v: 255 if v > 32 else 0)
+    keep = Image.new("L", img.size, 255)
+    k, (x0, y0) = INK_DPI / 72, page.bbox[:2]
+    d = ImageDraw.Draw(keep)
+    pad = 3 * blur                             # the blur spreads each stroke's difference this far
+    for c in page.chars:                       # native text is not the image's ink
+        d.rectangle(((c["x0"] - x0) * k - pad, (c["top"] - y0) * k - pad,
+                     (c["x1"] - x0) * k + pad, (c["bottom"] - y0) * k + pad), fill=0)
+    return ImageChops.multiply(sharp, keep).histogram()[255]
 
 
 def page_stats(page) -> dict:
@@ -265,7 +289,9 @@ def page_stats(page) -> dict:
           "hybrid" - scan image plus a little native text (e.g. a typed header):
                      native text is kept and the scan is OCR'd
           "scan"   - no usable text, needs OCR
-          "blank"  - nothing on the page"""
+          "blank"  - nothing on the page
+    A little native text on a plain background image (a cover title, a
+    letterhead) is "text": the image has no marks of its own to OCR."""
     chars = sum(1 for c in page.chars if not c["text"].isspace())
     cov = image_coverage(page)
     has_graphics = bool(page.images) or len(page.curves) > 20
@@ -276,6 +302,8 @@ def page_stats(page) -> dict:
     elif chars < MIN_TEXT_CHARS_PER_PAGE and cov >= 0.5:
         kind = "hybrid"
     else:
+        kind = "text"
+    if kind == "hybrid" and image_marks(page) <= SCAN_MAX_MARKS:
         kind = "text"
     return {"kind": kind, "chars": chars, "coverage": cov}
 
@@ -1718,6 +1746,22 @@ class PDFOCRRequiredError(ValueError):
         self.pdf_type = pdf_type
 
 
+class UnsupportedFileError(ValueError):
+    """Same as Firecrawl's SCRAPE_UNSUPPORTED_FILE_ERROR: not a PDF, and not an
+    image the image parser may OCR."""
+    code = "SCRAPE_UNSUPPORTED_FILE_ERROR"
+
+    def __init__(self, reason):
+        super().__init__(
+            f"The file type cannot be processed: {reason}. Supported are PDFs and raster "
+            f'images (PNG, JPEG, TIFF, GIF, BMP, WebP), which are OCR\'d when the parsers '
+            f'option includes "image" (the default).')
+        self.reason = reason
+
+
+PAGE_MARKER = "---\n\n<!-- page {n} -->"   # Firecrawl's pageMarkers join, between pages
+
+
 def load_source(src):
     """path | URL | bytes -> (bytes, display name, is_url)."""
     if isinstance(src, (bytes, bytearray)):
@@ -1733,7 +1777,7 @@ def load_source(src):
 
 
 def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
-            page_range: Optional[str] = None, page_markers: bool = False,
+            page_range: Optional[str] = None, page_markers=False,
             images: str = "save", image_dir: Optional[str] = None,
             link_base: Optional[str] = None, ocr_lang: str = "eng",
             image_dpi: int = 150, password: Optional[str] = None,
@@ -1744,6 +1788,8 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                "ocr":  OCR every page
     max_pages  parse at most this many pages (after page_range)
     page_range e.g. "1-5,8"
+    page_markers True: Firecrawl's "---" + <!-- page N --> between pages;
+               "every": <!-- page N --> before every page (vision draft, for splitting)
     images     "save" (PNG files in image_dir), "embed" (base64), or "none"
     link_base  folder that image links are written relative to
     """
@@ -1961,8 +2007,11 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 seq = sorted(items, key=lambda l: (l.top, l.x0))
             blks = render_blocks(seq, base, tiers, col_width, image_md)
 
-            if page_markers:
+            if page_markers == "every":       # internal (vision draft): every page, for splitting
                 emit(f"<!-- page {pageno} -->", "\n\n")
+                prev_list = False
+            elif page_markers and doc:        # Firecrawl: between pages, none before the first
+                emit(PAGE_MARKER.format(n=pageno), "\n\n")
                 prev_list = False
 
             w, h = widths[pageno], heights[pageno]
@@ -2035,17 +2084,34 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
 
 # ───────────────────────────── 11. Firecrawl-style API ────────────────────
 
+def is_pdf_buffer(data: bytes) -> bool:
+    """Firecrawl's isPdfBuffer: `%PDF` anywhere in the first 1 KB (BOM, whitespace
+    or junk may come first)."""
+    return b"%PDF" in data[:1024]
+
+
 def _parser_opts(parsers):
-    """Normalize Firecrawl `parsers` -> (pdf_options or None, image_enabled)."""
+    """Normalize Firecrawl `parsers` -> (pdf_options or None, image_enabled).
+    As in Firecrawl's schema: only "pdf" and "image" (string or object form), the
+    image object takes no options, and the deprecated pdf option `pageMarkdown`
+    folds into `pages` (an explicit `pages` wins)."""
     if parsers is None:
         parsers = ["pdf", "image"]
     pdf_opts, image_on = None, False
     for p in parsers:
-        ptype = p if isinstance(p, str) else (p or {}).get("type")
+        ptype = p if isinstance(p, str) else p.get("type") if isinstance(p, dict) else None
         if ptype == "pdf":
             pdf_opts = {} if isinstance(p, str) else dict(p)
+            alias = pdf_opts.pop("pageMarkdown", None)
+            if pdf_opts.get("pages") is None and alias is not None:
+                pdf_opts["pages"] = alias
         elif ptype == "image":
+            extra = sorted(set(p) - {"type"}) if isinstance(p, dict) else []
+            if extra:
+                raise ValueError(f"image parser takes no options: {extra}")
             image_on = True
+        else:
+            raise ValueError(f'unknown parser {p!r}: use "pdf" or "image"')
     return pdf_opts, image_on
 
 
@@ -2066,7 +2132,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     data, name, is_url = load_source(url)
     pdf_opts, image_on = _parser_opts(parsers)
     meta = {"sourceURL" if is_url else "sourceFile": url if is_url else name}
-    is_pdf = b"%PDF-" in data[:1024]
+    is_pdf = is_pdf_buffer(data)
     warnings = [f"format '{f}' is not supported for files; ignored"
                 for f in formats if f != "markdown"]
 
@@ -2081,8 +2147,15 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
                                    "pageMarkers", "images"}
         if unknown:
             raise ValueError(f"unknown pdf parser options: {sorted(unknown)}")
+        for opt in ("pages", "blocks", "pageMarkers"):         # Firecrawl: z.boolean()
+            if opt in pdf_opts and not isinstance(pdf_opts[opt], bool):
+                raise ValueError(f"{opt} must be true or false")
+        mp = pdf_opts.get("maxPages", 1)                      # Firecrawl: int 1..10000
+        if "maxPages" in pdf_opts and (isinstance(mp, bool) or not isinstance(mp, int)
+                                       or not 1 <= mp <= 10000):
+            raise ValueError("maxPages must be an integer from 1 to 10000")
         r = convert(data, mode=pdf_opts.get("mode", "auto"), max_pages=pdf_opts.get("maxPages"),
-                    page_range=page_range, page_markers=bool(pdf_opts.get("pageMarkers")),
+                    page_range=page_range, page_markers=pdf_opts.get("pageMarkers", False),
                     images=pdf_opts.get("images", images), image_dir=image_dir,
                     link_base=link_base, ocr_lang=ocr_lang, image_dpi=image_dpi,
                     password=password, name=name)
@@ -2099,14 +2172,14 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
         if pdf_opts.get("blocks"):
             out["blocks"] = r.blocks
     else:
-        if not image_on:
-            return raw()
         from PIL import Image
         try:
             img = Image.open(io.BytesIO(data))
             img.load()
         except Exception:
-            raise ValueError("input is neither a PDF nor a readable image")
+            raise UnsupportedFileError("not a PDF or a readable image")
+        if not image_on:
+            raise UnsupportedFileError('an image, and the parsers option leaves out "image"')
         paras = ocr_image(flatten_alpha(img), ocr_lang) if ocr_available() else None
         if paras is None:
             warnings.append("image needs OCR but Tesseract is not available; "
@@ -2120,8 +2193,371 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     return {"success": True, "data": out}
 
 
+# ───────────────────────────── 12. vision step (charts, scans) ──────────
+
+VISION_DOC = """Charts and scanned pages, read by the agent's own vision model.
+
+Two steps around the model, so no API keys or network calls are needed here:
+
+  python pdf2md.py prepare report.pdf work/   # convert + images + work/tasks.json
+  (the agent opens each image in tasks.json, follows its prompt,
+   and writes the answer to work/answers/<id>.md)
+  python pdf2md.py merge work/ -o report.md   # check numbers, build final markdown
+
+Every number in an answer is looked up in the page's own text (native text, or
+Tesseract OCR for scans and pictures). Numbers that aren't found get a warning
+sign; values the model read off the drawing are written with a leading ~.
+"""
+
+MIN_PICTURE_PT = (150, 100)     # embedded pictures smaller than this are logos/icons
+SCAN_DPI = 200
+MAX_SIDE_PX = 2000
+CONTEXT_CHARS = 3000
+
+LEGEND = ("~ = estimated from the drawing, not printed; "
+          "\u26a0 = number not found in the page text, check it against the image.")
+
+CHART_PROMPT = """This image is a chart from page {page} of a PDF.
+Text found on that page, for the exact spelling of labels:
+---
+{context}
+---
+Write the chart's data as one Markdown table: first column the categories (axis
+labels or slice names), then one column per series, named as in the legend.
+Copy every number that is printed on the chart exactly as printed.
+If a value is not printed and you read it from the bar length or the axis, write
+it with a leading ~ (for example ~42). If you cannot read a value, leave the cell empty.
+Put the chart title on one line above the table if the chart has one.
+If the chart prints no numbers and has no numbered axis, do not make a table; write:
+No values shown on this chart. Categories: <names>. Series: <names>.
+Output only the title line and the table (or that one line)."""
+
+PICTURE_PROMPT = """This image is a picture from page {page} of a PDF.
+If it is a chart or a table, write its data as Markdown: a title line if it has one,
+then a Markdown table. Copy printed numbers exactly; a value read from a bar length
+or an axis gets a leading ~ (for example ~42); leave a cell empty if you cannot read it.
+If it is not a chart or a table (a logo, a photo, a signature), output only: NONE"""
+
+PAGE_PROMPT = """This image is page {page} of a scanned PDF.
+Transcribe the whole page as Markdown, top to bottom:
+- headings as #, ##, ###; paragraphs as text; lists as - or 1.
+- anything laid out in rows and columns as a Markdown table, one row per row
+- each chart as a title line followed by a Markdown table of its values
+Copy every word and every printed number exactly. A chart value that is not printed
+and that you read from a bar length or an axis gets a leading ~ (for example ~42).
+Do not summarize, skip, or add anything that is not on the page.
+Output only the Markdown."""
+
+
+# ---- numbers ----
+# A number in the model's answer must match the page in value, sign and row.
+
+NUM_RE = re.compile(r"(~\s*)?(\(\s*)?([-−]\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)(\s*\))?")
+GROUPED_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+ISSUES = (("unverified", "NOT FOUND in page text"), ("sign", "SIGN DIFFERS from page text"),
+          ("wrong_row", "IN ANOTHER ROW"), ("row_unconfirmed", "ROW NOT CONFIRMED"))
+
+
+def norm_number(s: str) -> str:
+    """'1,200' -> '1200', '34.80' -> '34.8', '05' -> '5'; '12,00' (not thousands groups) stays."""
+    s = s.rstrip(",")
+    if not GROUPED_RE.fullmatch(s):
+        return s
+    s = s.replace(",", "")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s.lstrip("0") or "0"
+
+
+def number_tokens(text: str) -> list:
+    """[{n, neg, est, start, end}]: neg is True for -x or (x), None for a date part (07/2024)."""
+    out = []
+    for m in NUM_RE.finditer(text):
+        est, lp, minus, raw, rp = m.groups()
+        if minus and m.start(3) > 0 and text[m.start(3) - 1].isalnum():
+            minus = None                                     # 2019-2020: a range dash
+        date = text[m.start(4) - 1:m.start(4)] == "/" or text[m.end(4):m.end(4) + 1] == "/"
+        out.append({"n": norm_number(raw), "neg": None if date else bool(minus or (lp and rp)),
+                    "est": bool(est), "start": m.start(), "end": m.end(), "raw": raw.rstrip(",")})
+    return out
+
+
+def numbers_in(text: str) -> set:
+    return {t["n"] for t in number_tokens(text) if not t["est"]}
+
+
+def _keys(text) -> set:
+    out = set()
+    for t in number_tokens(text):
+        if not t["est"]:
+            out |= {t["n"], t["n"] + "-"} if t["neg"] is None else {t["n"] + "-" * t["neg"]}
+    return out
+
+
+def _row_labels(answer) -> list:
+    """[(start, end, label)] for answer table rows whose first cell is text."""
+    out, pos = [], 0
+    for line in answer.splitlines(keepends=True):
+        st = line.strip()
+        if st.startswith("|") and not re.fullmatch(r"[|\-:\s]+", st):
+            lab = st.strip("|").split("|")[0].strip()
+            if len(lab) >= 2 and not number_tokens(lab):
+                out.append((pos, pos + len(line), lab))
+        pos += len(line)
+    return out
+
+
+def _label_values(source, labels) -> dict:
+    """label -> number keys next to it on the page: on each line where the label occurs, from the
+    label to the next other label on that line (nested labels share); if that stretch has no
+    number (values wrapped below the label), the line below."""
+    lines = source.splitlines()
+    pats = {lab: re.compile(r"(?<!\w)" + re.escape(lab.lower()) + r"(?!\w)") for lab in labels}
+    out = {}
+    for i, line in enumerate(lines):
+        low = line.lower()
+        hits = sorted((m.start(), m.end(), lab) for lab, pat in pats.items() for m in pat.finditer(low))
+        for st, en, lab in hits:
+            stop = next((h[0] for h in hits if h[0] >= en and h[2] != lab), len(line))
+            keys = _keys(line[en:stop])
+            if not keys and i + 1 < len(lines):
+                keys = _keys(lines[i + 1])
+            out.setdefault(lab, set()).update(keys)
+    return out
+
+
+def check_answer(answer: str, source: str):
+    """Mark numbers that don't match the page. Returns (marked text, issues, estimated):
+    issues = {unverified, sign, wrong_row, row_unconfirmed} -> lists of numbers as written;
+    the first three are marked with a warning sign in the text."""
+    seen = {}
+    for t in number_tokens(source):
+        if not t["est"]:
+            seen.setdefault(t["n"], []).append(t["neg"])
+    rows = _row_labels(answer)
+    near = _label_values(source, [r[2] for r in rows])
+    issues = {k: [] for k, _ in ISSUES}
+    estimated, out, last = 0, [], 0
+    for t in number_tokens(answer):
+        kind = None
+        if t["est"]:
+            estimated += 1
+        elif t["n"] not in seen:
+            kind = "unverified"
+        elif not any(s is None or t["neg"] is None or s == t["neg"] for s in seen[t["n"]]):
+            kind = "sign"
+        else:
+            row = next((r for r in rows if r[0] <= t["start"] < r[1]), None)
+            if row and t["start"] - row[0] > len(row[2]):        # a value cell, not the label
+                want = {t["n"], t["n"] + "-"} if t["neg"] is None else {t["n"] + "-" * t["neg"]}
+                if not want & near.get(row[2], set()):
+                    if any(want & near.get(r[2], set()) for r in rows if r[2] != row[2]):
+                        kind = "wrong_row"
+                    else:
+                        issues["row_unconfirmed"].append(t["raw"])
+        out.append(answer[last:t["end"]] + (" ⚠" if kind else ""))
+        last = t["end"]
+        if kind:
+            issues[kind].append(t["raw"])
+    out.append(answer[last:])
+    return "".join(out), issues, estimated
+
+
+# ---- prepare ----
+
+def _upright(img):
+    rot = detect_rotation(img) if ocr_available() else 0
+    img = img.rotate(-rot, expand=True) if rot else img
+    img.thumbnail((MAX_SIDE_PX, MAX_SIDE_PX))
+    return img
+
+
+def _ocr_text(img) -> str:
+    if not ocr_available():
+        return ""
+    paras = ocr_image(flatten_alpha(img)) or []
+    return "\n".join(p["text"] for p in paras)
+
+
+def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=None):
+    if not ocr_available():                 # numbers on scans/pictures are checked against OCR
+        raise RuntimeError("Tesseract is required for the vision step: install it "
+                           "(macOS: brew install tesseract; Linux: apt install tesseract-ocr) "
+                           "and pip install pytesseract")
+    os.makedirs(os.path.join(work, "answers"), exist_ok=True)
+    img_dir = os.path.join(work, "images")
+    r = convert(src, mode=mode, page_range=page_range, max_pages=max_pages,
+                       password=password, page_markers="every", images="save",
+                       image_dir=img_dir, link_base=work)
+    with open(os.path.join(work, "draft.md"), "w", encoding="utf-8") as f:
+        f.write(r.markdown)
+    page_md = {p["pageNumber"]: p["markdown"] for p in r.pages}
+    have_ocr = ocr_available()
+    tasks = []
+
+    # charts and pictures already saved by convert()
+    for ref in r.images:
+        if not ref.path:
+            continue
+        w_, h_ = ref.bbox[2] - ref.bbox[0], ref.bbox[3] - ref.bbox[1]
+        chart = ref.alt.startswith("Chart")
+        if not chart and (w_ < MIN_PICTURE_PT[0] or h_ < MIN_PICTURE_PT[1]):
+            continue
+        link = os.path.relpath(os.path.abspath(ref.path), work).replace(os.sep, "/")
+        context = page_md.get(ref.page, "")
+        check = context
+        if not chart:                       # numbers on a picture are pixels: OCR them
+            from PIL import Image
+            with Image.open(ref.path) as im:
+                check += "\n" + _ocr_text(im)
+        tid = f"p{ref.page}_{'chart' if chart else 'img'}{ref.index}"
+        prompt = (CHART_PROMPT if chart else PICTURE_PROMPT).format(
+            page=ref.page, context=context[:CONTEXT_CHARS])
+        tasks.append({"id": tid, "kind": "chart" if chart else "picture", "page": ref.page,
+                      "image": link, "link": link, "prompt": prompt, "check_text": check})
+
+    # scanned pages: the whole page, upright
+    scan_dir = os.path.join(work, "scans")
+    data, _, _ = load_source(src)
+    with pdfplumber.open(io.BytesIO(data), password=password or "") as pdf:
+        for pageno in sorted(page_md):
+            page = pdf.pages[pageno - 1]
+            if page_stats(page)["kind"] not in ("scan", "hybrid") and mode != "ocr":
+                continue
+            os.makedirs(scan_dir, exist_ok=True)
+            img = _upright(page.to_image(resolution=SCAN_DPI).original)
+            path = os.path.join(scan_dir, f"page_{pageno}.png")
+            img.save(path)
+            tasks.append({"id": f"p{pageno}_page", "kind": "page", "page": pageno,
+                          "image": f"scans/page_{pageno}.png",
+                          "prompt": PAGE_PROMPT.format(page=pageno),
+                          "check_text": page_md.get(pageno, "")})
+            page.close()
+
+    manifest = {"source": r.source_name, "pdf_type": r.pdf_type, "ocr_available": have_ocr,
+                "pages": sorted(page_md), "tasks": tasks}
+    with open(os.path.join(work, "tasks.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, ensure_ascii=False)
+    return manifest
+
+
+# ---- merge ----
+
+PAGE_SPLIT = re.compile(r"<!-- page (\d+) -->\n?")
+
+
+def _split_pages(md: str) -> dict:
+    """draft.md (a marker before every page) -> {page: markdown}."""
+    parts = PAGE_SPLIT.split(md)
+    return {int(parts[i]): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
+
+
+def merge(work, page_markers=False):
+    with open(os.path.join(work, "tasks.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    with open(os.path.join(work, "draft.md"), encoding="utf-8") as f:
+        pages = _split_pages(f.read())
+    report = []
+    for t in manifest["tasks"]:
+        ans_path = os.path.join(work, "answers", t["id"] + ".md")
+        entry = {"id": t["id"], "kind": t["kind"], "page": t["page"], "image": t["image"]}
+        if not os.path.exists(ans_path):
+            entry["status"] = "no answer: original output kept"
+            report.append(entry)
+            continue
+        with open(ans_path, encoding="utf-8") as f:
+            answer = f.read().strip()
+        answer = re.sub(r"^```\w*\n|\n```$", "", answer).strip()  # stray code fences
+        if t["kind"] == "picture" and answer.upper().startswith("NONE"):
+            entry["status"] = "not a chart or table"
+            report.append(entry)
+            continue
+        marked, issues, estimated = check_answer(answer, t["check_text"])
+        entry.update(status="merged", estimated=estimated, **issues)
+        if not t["check_text"].strip():
+            entry["note"] = "no page text to check against (no OCR?): every number is unchecked"
+        md = pages.get(t["page"], "")
+        if t["kind"] == "page":
+            note = f"*Page read from the scan by the vision model. {LEGEND}*"
+            pages[t["page"]] = f"![Page {t['page']} (scan)]({t['image']})\n\n{note}\n\n{marked}"
+        else:
+            note = f"*Chart data read from the image by the vision model. {LEGEND}*"
+            pos = md.find("](" + t["link"] + ")")
+            if pos < 0:
+                entry["status"] = "image link not found in draft: answer appended to page"
+                pages[t["page"]] = md + f"\n\n{note}\n\n{marked}"
+            else:
+                end = md.find("\n", pos)
+                end = len(md) if end < 0 else end
+                pages[t["page"]] = md[:end] + f"\n\n{note}\n\n{marked}" + md[end:]
+        report.append(entry)
+
+    out = []
+    for pn in manifest["pages"]:
+        body = pages.get(pn, "")
+        if page_markers and out:
+            out.append(PAGE_MARKER.format(n=pn))
+        if body:
+            out.append(body)
+    md = "\n\n".join(out) + "\n"
+    with open(os.path.join(work, "report.json"), "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    return md, report
+
+
+def summary(report) -> str:
+    lines = []
+    for e in report:
+        s = f"{e['id']}: {e['status']}"
+        for key, label in ISSUES:
+            if e.get(key):
+                s += f"; {label}: {', '.join(e[key])}"
+        if e.get("estimated"):
+            s += f"; {e['estimated']} estimated value(s)"
+        if e.get("note"):
+            s += f"; {e['note']}"
+        lines.append(s)
+    return "\n".join(lines) or "no charts or scanned pages"
+
+
+def vision_main(argv):
+    ap = argparse.ArgumentParser(prog="pdf2md.py", description=VISION_DOC,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("prepare", help="convert the PDF and list images for the model")
+    p.add_argument("pdf")
+    p.add_argument("work", help="work folder (created)")
+    p.add_argument("--mode", default="auto", choices=["auto", "ocr"])
+    p.add_argument("--page-range")
+    p.add_argument("--max-pages", type=int)
+    p.add_argument("--password")
+    m = sub.add_parser("merge", help="check the model's answers and write the final markdown")
+    m.add_argument("work")
+    m.add_argument("-o", "--output", help="markdown file (default: print)")
+    m.add_argument("--page-markers", action="store_true")
+    a = ap.parse_args(argv)
+    if a.cmd == "prepare":
+        try:
+            man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password)
+        except RuntimeError as e:
+            sys.exit(f"error: {e}")
+        print(f"{len(man['tasks'])} image task(s) in {os.path.join(a.work, 'tasks.json')}")
+        for t in man["tasks"]:
+            print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}")
+        return
+    md, report = merge(a.work, a.page_markers)
+    if a.output:
+        with open(a.output, "w", encoding="utf-8") as f:
+            f.write(md)
+    else:
+        sys.stdout.write(md)
+    print(summary(report), file=sys.stderr)
+
+
 def main(argv=None):
-    import json
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] in ("prepare", "merge"):
+        return vision_main(argv)
     ap = argparse.ArgumentParser(
         description="PDF to Markdown with Firecrawl-style options "
                     "(headings, paragraphs, lists, tables, images, OCR).")
@@ -2135,7 +2571,8 @@ def main(argv=None):
                     help="include per-page markdown (JSON output)")
     ap.add_argument("--blocks", action="store_true",
                     help="include typed layout blocks (JSON output)")
-    ap.add_argument("--page-markers", action="store_true", help="insert <!-- page N --> markers")
+    ap.add_argument("--page-markers", action="store_true",
+                    help="insert ---/<!-- page N --> between pages (Firecrawl's pageMarkers)")
     ap.add_argument("--json", action="store_true",
                     help="print the Firecrawl-style JSON response instead of markdown")
     ap.add_argument("--parsers", help='raw Firecrawl parsers JSON, e.g. '

@@ -14,6 +14,8 @@ from reportlab.pdfgen import canvas
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from pdf2md import convert  # noqa: E402
+sys.path.insert(0, HERE)
+from fonts import font  # noqa: E402
 
 W, H = letter
 OUT = tempfile.mkdtemp(prefix="pdf2md_layout_")
@@ -26,6 +28,7 @@ def check(name, cond, detail=""):
 
 def run(path):
     return convert(path, images="none")
+
 
 
 def spans_ok(r):
@@ -420,14 +423,10 @@ def test_negative(name, builder, must_have, table_header=None, table_len=None):
 
 def rotated_scan(path, angle):
     """A scanned page lying sideways / upside down (text is pixels only)."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
     im = Image.new("RGB", (1700, 2200), "white")
     d = ImageDraw.Draw(im)
-    try:
-        big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-        f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 34)
-    except OSError:
-        big = f = ImageFont.load_default()
+    big, f = font(60, bold=True), font(34, serif=True)
     d.text((150, 150), "Annual Overview", font=big, fill="black")
     y = 300
     for ln in ["The firm manages assets for institutional clients across",
