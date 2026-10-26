@@ -104,7 +104,10 @@ python pdf2md.py prepare report.pdf work/   # draft.md, images, tasks.json (one 
 python pdf2md.py merge work/ -o report.md   # every number checked against page text / OCR
 ```
 
-Numbers not found in the page's own text are marked ⚠; values read off a drawing are written `~42`.
+Every number in an answer must match the page's own text in value, sign (`-4.5`, `(1,200)`) and, for
+table rows, row: a number not found, with the other sign, or sitting next to another row's label is
+marked ⚠. Numbers whose row label can't be located on the page are listed as `ROW NOT CONFIRMED`.
+Values read off a drawing are written `~42`.
 OCR on JPEG scans sometimes misreads a digit (`17.5` as `1735`); the model's correct value is then
 flagged ⚠, never passed silently.
 Missing answers keep the plain pdf2md output.

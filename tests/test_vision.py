@@ -94,10 +94,41 @@ def test_numbers():
     check("norm 1,200", pv.norm_number("1,200") == "1200")
     check("norm 34.80", pv.norm_number("34.80") == "34.8")
     check("norm 5.0", pv.norm_number("5.0") == "5")
-    marked, unv, est = pv.check_answer("| A | 34.8 | ~42 | 99 |", "value 34.80 here")
+    marked, iss, est = pv.check_answer("| A | 34.8 | ~42 | 99 |", "value 34.80 here")
     check("verified number unmarked", "34.8 |" in marked, marked)
     check("estimate kept, not flagged", "~42 |" in marked and est == 1, marked)
-    check("unknown number flagged", "99 ⚠" in marked and unv == ["99"], (marked, unv))
+    check("unknown number flagged", "99 ⚠" in marked and iss["unverified"] == ["99"], (marked, iss))
+
+
+def flagged(iss):
+    return iss["unverified"] + iss["sign"] + iss["wrong_row"]
+
+
+def test_sign_and_position():
+    """Numbers must match the page in value, sign and row."""
+    src = "Net income (1,200) Margin -4.5% Q1 2023 revenue 310 Q2 2023 revenue 295"
+    bad = [("| Net income | 1,200 |", "sign", ["1,200"]),
+           ("| Margin | 4.5% |", "sign", ["4.5"]),
+           ("| Q1 | 295 |\n| Q2 | 310 |", "wrong_row", ["295", "310"]),
+           ("| x | 12,00 |", "unverified", ["12,00"])]
+    for ans, kind, vals in bad:
+        marked, iss, _ = pv.check_answer(ans, src)
+        check(f"flagged as {kind}: {ans!r}", iss[kind] == vals and all(v + " ⚠" in marked for v in vals), iss)
+    for ans in ("| Net income | (1,200) |", "| Net income | -1,200 |", "| Margin | -4.5% |",
+                "| Q1 | 310 |\n| Q2 | 295 |", "| Year | 2023 |", "| Q1 | ~300 |"):
+        marked, iss, _ = pv.check_answer(ans, src)
+        check(f"clean: {ans!r}", "⚠" not in marked and not flagged(iss), iss)
+    _, iss, _ = pv.check_answer("| Period | 2019-2020 |", "Period 2019-2020")
+    check("range dash is not a minus", not any(iss.values()), iss)
+    _, iss, _ = pv.check_answer("| Due | 07/2024 |", "Period 07/2023 -07/2024")
+    check("date parts match either sign", not flagged(iss), iss)
+    _, iss, _ = pv.check_answer("| Alpha | 34.8 |", "Scores 34.8 28.3\nunrelated line")
+    check("row label not on the page: row not confirmed, no ⚠",
+          iss["row_unconfirmed"] == ["34.8"] and not iss["wrong_row"], iss)
+    _, iss, _ = pv.check_answer("| Alpha | 34.8 |\n| Alpha Securities | 34.8 |", "Alpha Securities 34.8 1")
+    check("nested labels share their line", not any(iss.values()), iss)
+    _, iss, _ = pv.check_answer("| Alpha | 34.8 |", "Alpha Beta\n34.8 28.3")
+    check("values on the line below their label", not any(iss.values()), iss)
 
 
 def test_requires_tesseract():
@@ -166,6 +197,15 @@ def test_scanned(angle):
         check(f"scan {angle}: printed values not flagged", "| Alpha Securities | 34.8 | 1 |" in md, md)
         check(f"scan {angle}: invented row flagged",
               "12.9 ⚠" in md and entry(rep, t["id"])["unverified"] == ["12.9"], rep)
+        check(f"scan {angle}: nothing else flagged",
+              not any(entry(rep, t["id"])[k] for k in ("sign", "wrong_row")), entry(rep, t["id"]))
+        swapped = ANSWER.replace("| Alpha Securities | 34.8 | 1 |", "| Alpha Securities | 28.3 | 1 |") \
+                        .replace("| Beta Capital | 28.3 | 2 |", "| Beta Capital | 34.8 | 2 |")
+        write_answer(work, t["id"], swapped)
+        md2, rep2 = pv.merge(work)
+        check(f"scan {angle}: swapped scores flagged as in another row",
+              entry(rep2, t["id"])["wrong_row"] == ["28.3", "34.8"] and "| 28.3 ⚠ | 1 |" in md2, entry(rep2, t["id"]))
+        check(f"scan {angle}: summary names it", "IN ANOTHER ROW: 28.3, 34.8" in pv.summary(rep2), pv.summary(rep2))
         check(f"scan {angle}: scan image linked", "![Page 1 (scan)](scans/page_1.png)" in md)
         check(f"scan {angle}: one-page document has no page marker", "<!-- page" not in md, md[:200])
 
@@ -182,7 +222,8 @@ def test_jpeg_scan_safety_net():
             md, rep = pv.merge(work)
             seen = pv.numbers_in(t["check_text"])
             missing = [n for n in ("34.8", "28.3", "17.5", "1", "2", "3") if n not in seen]
-            unverified = set(entry(rep, t["id"])["unverified"])
+            e = entry(rep, t["id"])
+            unverified = set(e["unverified"]) | set(e["sign"]) | set(e["wrong_row"])
             check(f"jpeg scan {angle}: every value OCR missed is flagged",
                   all(n in unverified for n in missing), (missing, unverified))
             check(f"jpeg scan {angle}: invented row flagged", "12.9 ⚠" in md, md)
@@ -207,6 +248,47 @@ def test_page_markers():
               and md.index("Cover note") < md.index("<!-- page 2 -->") < md.index("Broker Review"), md)
 
 
+def text_blank_pdf(path, last_is_scan):
+    """page 1 text, page 2 blank, page 3 text or the scan."""
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(path, pagesize=(612, 792))
+    c.setFont("Helvetica", 11)
+    c.drawString(72, 720, "Page one text with value 100.")
+    c.showPage()
+    c.showPage()
+    if last_is_scan:
+        png = path + ".png"
+        scan_image().save(png)
+        c.drawImage(png, 0, 0, 612, 792)
+    else:
+        c.setFont("Helvetica", 11)
+        c.drawString(72, 720, "Page three text with value 300.")
+    c.showPage()
+    c.save()
+    return path
+
+
+def test_blank_page():
+    with tempfile.TemporaryDirectory() as tmp:
+        work = os.path.join(tmp, "w1")
+        pv.prepare(text_blank_pdf(os.path.join(tmp, "a.pdf"), False), work)
+        md, _ = pv.merge(work)
+        check("text/blank/text: no marker leaks without page markers", "<!--" not in md and "---" not in md, md)
+        check("text/blank/text: each page once", md.count("Page one") == 1 and md.count("Page three") == 1, md)
+        md, _ = pv.merge(work, page_markers=True)
+        check("text/blank/text: one marker per later page",
+              md.count("<!-- page 2 -->") == 1 and md.count("<!-- page 3 -->") == 1 and "<!-- page 1 -->" not in md, md)
+        work = os.path.join(tmp, "w2")
+        man = pv.prepare(text_blank_pdf(os.path.join(tmp, "b.pdf"), True), work)
+        t = [t for t in man["tasks"] if t["kind"] == "page"]
+        check("text/blank/scan: scan task is page 3", [x["page"] for x in t] == [3], man["tasks"])
+        write_answer(work, "p3_page", ANSWER)
+        md, rep = pv.merge(work)
+        check("text/blank/scan: answer merged once, OCR draft not repeated",
+              md.count("Broker Review") == 1 and md.count("![Page 3 (scan)]") == 1, md)
+        check("text/blank/scan: page 1 kept", "Page one text" in md, md[:200])
+
+
 def test_missing_answer():
     with tempfile.TemporaryDirectory() as tmp:
         pdf = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
@@ -218,7 +300,7 @@ def test_missing_answer():
         check("no answer: OCR output kept", "Broker Review" in md, md)
         check("no answer: scan not linked", "scan)" not in md, md)
         check("no answer: reported", entry(rep, "p1_page")["status"].startswith("no answer"), rep)
-        check("no answer: same text as draft", md.strip() == draft.strip())
+        check("no answer: same text as draft", md.strip() == draft.replace("<!-- page 1 -->", "").strip())
 
 
 def test_cli():
@@ -235,6 +317,7 @@ def test_cli():
 
 if __name__ == "__main__":
     test_numbers()
+    test_sign_and_position()
     test_requires_tesseract()
     if HAVE_OCR:
         test_vector_chart()
@@ -242,6 +325,7 @@ if __name__ == "__main__":
             test_scanned(a)
         test_jpeg_scan_safety_net()
         test_page_markers()
+        test_blank_page()
         test_missing_answer()
         test_cli()
     else:

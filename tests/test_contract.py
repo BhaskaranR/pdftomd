@@ -198,6 +198,13 @@ def test_pdf_options(pdf):
                        parsers=[{"type": "pdf", "pageMarkers": True}])["data"]["markdown"]
     check("pageMarkers + page range 2-3: no marker before page 2, one before 3",
           "<!-- page 2 -->" not in md and "\n\n---\n\n<!-- page 3 -->\n\n" in md, md)
+    blank_first = make_pdf("blank_first.pdf", [lambda c: None, text_body])
+    md = scrape(blank_first, parsers=[{"type": "pdf", "pageMarkers": True}])["data"]["markdown"]
+    check("pageMarkers, blank first page: output does not start with ---", not md.startswith("---"), md[:60])
+    blank_all = make_pdf("blank_all.pdf", [lambda c: None, lambda c: None])
+    d = scrape(blank_all, parsers=[{"type": "pdf", "pageMarkers": True}])["data"]
+    check("pageMarkers, all-blank PDF: no markers", "<!--" not in d["markdown"] and "---" not in d["markdown"],
+          repr(d["markdown"]))
     one = make_pdf("one.pdf", [text_body])
     md = scrape(one, parsers=[{"type": "pdf", "pageMarkers": True}])["data"]["markdown"]
     check("pageMarkers on a one-page PDF: no marker", "<!--" not in md and "---" not in md, md[:120])
@@ -310,6 +317,28 @@ def test_routing():
     check("sparse scan (one line) with a native header: still needs OCR",
           d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])
     check_ocr("sparse scan with a native header: line OCR'd", "118 crates" in d["markdown"], d["markdown"])
+
+    from PIL import ImageDraw
+    for name, px, ink in (("8.6pt line", 24, "black"), ("light grey line", 28, "#b4b4b4"), ("short word", 26, "black")):
+        im = Image.new("RGB", (1700, 2200), "white")
+        text = "Paid" if name == "short word" else "Total due 48,250.00"
+        ImageDraw.Draw(im).text((150, 900), text, font=font(px), fill=ink)
+        png = os.path.join(TMP, f"small_{px}.png"); im.save(png)
+        small = make_pdf(f"small_{px}.pdf", [lambda c, png=png: (full_image(png)(c), c.setFont("Helvetica", 9),
+                                                              c.drawString(72, 760, "ACME BANK - Statement"))])
+        d = scrape(small)["data"]
+        check(f"scan with only a {name} + native header: still needs OCR",
+              d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])
+        if name != "light grey line":   # Tesseract can't read faint print (same on main); routing is what counts
+            check_ocr(f"scan with only a {name}: text OCR'd", text.split()[-1] in d["markdown"], d["markdown"])
+    im = Image.new("RGB", (1700, 2200), "white")
+    ImageDraw.Draw(im).line([(300, 1500), (420, 1440), (520, 1520), (640, 1450)], fill="black", width=4)
+    png = os.path.join(TMP, "signature.png"); im.save(png)
+    sig = make_pdf("signature.pdf", [lambda c: (full_image(png)(c), c.setFont("Helvetica", 9),
+                                                c.drawString(72, 760, "Signed for ACME BANK"))])
+    d = scrape(sig)["data"]
+    check("scan with only a signature + native header: not treated as a plain background",
+          d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])
 
     d = scrape(header)["data"]
     check("scan with a native header: page needs OCR", d["metadata"].get("pagesNeedingOcr") == [1], d["metadata"])

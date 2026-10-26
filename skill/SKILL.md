@@ -42,16 +42,20 @@ install hint without it, because every number is checked against OCR text.
    python scripts/pdf2md.py merge <work_folder> -o <output.md>
    ```
 
-   It checks every number in your answers against the page's own text (or OCR),
-   marks any number it can't find with ⚠, and writes the final Markdown.
+   It checks every number in your answers against the page's own text (or OCR): the value,
+   its sign (`-4.5`, `(1,200)`) and, in tables, its row. It marks every mismatch with ⚠
+   and writes the final Markdown.
    It prints one line per task.
 
 4. Report to the user:
    - where the Markdown file is;
-   - every line from step 3 that says `NOT FOUND`, `no answer`, or `unchecked`,
-     because those numbers need a person to check them against the image;
+   - every line from step 3 that says `NOT FOUND`, `SIGN DIFFERS`, `IN ANOTHER ROW`,
+     `ROW NOT CONFIRMED`, `no answer`, or `unchecked`, because those numbers need a person
+     to check them against the image;
    - how many values are estimates (`~`).
-   Do not say the numbers are verified when the merge output says otherwise.
+   Do not say the numbers are verified when the merge output says otherwise. A clean merge
+   report means every number was found on the page with its sign and row; it is not proof
+   that every cell is right.
 
 ## Options
 

@@ -260,25 +260,27 @@ def image_coverage(page) -> float:
 
 SCAN_COVERAGE = 0.8          # an image this big is treated as a page scan
 SCAN_MAX_NATIVE_CHARS = 300  # ...unless the page also carries this much real text
-SCAN_MIN_INK = 0.0005        # ...or the image is a plain background (share of marked pixels)
-INK_DPI = 36
+SCAN_MAX_MARKS = 20          # ...or the image has (almost) no marks: a plain background
+INK_DPI = 100
 
 
-def image_ink(page) -> float:
-    """Share of the page's pixels that the images mark, with the native text
-    painted out: a plain or faint background is ~0, a scan of text is not."""
-    from PIL import ImageDraw
+def image_marks(page) -> int:
+    """Pixels (at INK_DPI) where the page has a sharp mark of its own: darker or lighter than
+    its blurred surroundings, outside the native text. A plain or gradient background has
+    none; any print, stamp or signature in a scan has many."""
+    from PIL import Image, ImageChops, ImageDraw, ImageFilter
     img = page.to_image(resolution=INK_DPI).original.convert("L")
-    hist = img.histogram()
-    bg = max(range(256), key=hist.__getitem__)
+    blur = 5
+    sharp = ImageChops.difference(img, img.filter(ImageFilter.GaussianBlur(blur))).point(
+        lambda v: 255 if v > 32 else 0)
+    keep = Image.new("L", img.size, 255)
     k, (x0, y0) = INK_DPI / 72, page.bbox[:2]
-    d = ImageDraw.Draw(img)
-    for c in page.chars:
-        d.rectangle(((c["x0"] - x0) * k - 1, (c["top"] - y0) * k - 1,
-                     (c["x1"] - x0) * k + 1, (c["bottom"] - y0) * k + 1), fill=bg)
-    hist = img.histogram()
-    marked = sum(n for v, n in enumerate(hist) if abs(v - bg) > 48)
-    return marked / (img.width * img.height or 1)
+    d = ImageDraw.Draw(keep)
+    pad = 3 * blur                             # the blur spreads each stroke's difference this far
+    for c in page.chars:                       # native text is not the image's ink
+        d.rectangle(((c["x0"] - x0) * k - pad, (c["top"] - y0) * k - pad,
+                     (c["x1"] - x0) * k + pad, (c["bottom"] - y0) * k + pad), fill=0)
+    return ImageChops.multiply(sharp, keep).histogram()[255]
 
 
 def page_stats(page) -> dict:
@@ -289,7 +291,7 @@ def page_stats(page) -> dict:
           "scan"   - no usable text, needs OCR
           "blank"  - nothing on the page
     A little native text on a plain background image (a cover title, a
-    letterhead) is "text": there is nothing in the image to OCR."""
+    letterhead) is "text": the image has no marks of its own to OCR."""
     chars = sum(1 for c in page.chars if not c["text"].isspace())
     cov = image_coverage(page)
     has_graphics = bool(page.images) or len(page.curves) > 20
@@ -301,7 +303,7 @@ def page_stats(page) -> dict:
         kind = "hybrid"
     else:
         kind = "text"
-    if kind == "hybrid" and image_ink(page) < SCAN_MIN_INK:
+    if kind == "hybrid" and image_marks(page) <= SCAN_MAX_MARKS:
         kind = "text"
     return {"kind": kind, "chars": chars, "coverage": cov}
 
@@ -1775,7 +1777,7 @@ def load_source(src):
 
 
 def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
-            page_range: Optional[str] = None, page_markers: bool = False,
+            page_range: Optional[str] = None, page_markers=False,
             images: str = "save", image_dir: Optional[str] = None,
             link_base: Optional[str] = None, ocr_lang: str = "eng",
             image_dpi: int = 150, password: Optional[str] = None,
@@ -1786,6 +1788,8 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                "ocr":  OCR every page
     max_pages  parse at most this many pages (after page_range)
     page_range e.g. "1-5,8"
+    page_markers True: Firecrawl's "---" + <!-- page N --> between pages;
+               "every": <!-- page N --> before every page (vision draft, for splitting)
     images     "save" (PNG files in image_dir), "embed" (base64), or "none"
     link_base  folder that image links are written relative to
     """
@@ -1982,7 +1986,6 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
             pos += len(fragment)
             return [start, pos]
 
-        first_page = min(pages_lines, default=None)
         for pageno in sorted(pages_lines):
             items = pages_lines[pageno]
             regs = page_regions.get(pageno, [])
@@ -2004,7 +2007,10 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 seq = sorted(items, key=lambda l: (l.top, l.x0))
             blks = render_blocks(seq, base, tiers, col_width, image_md)
 
-            if page_markers and pageno != first_page:    # Firecrawl: between pages only
+            if page_markers == "every":       # internal (vision draft): every page, for splitting
+                emit(f"<!-- page {pageno} -->", "\n\n")
+                prev_list = False
+            elif page_markers and doc:        # Firecrawl: between pages, none before the first
                 emit(PAGE_MARKER.format(n=pageno), "\n\n")
                 prev_list = False
 
@@ -2244,38 +2250,117 @@ Output only the Markdown."""
 
 
 # ---- numbers ----
+# A number in the model's answer must match the page in value, sign and row.
 
-NUM_RE = re.compile(r"(~\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)")
+NUM_RE = re.compile(r"(~\s*)?(\(\s*)?([-−]\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)(\s*\))?")
+GROUPED_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+ISSUES = (("unverified", "NOT FOUND in page text"), ("sign", "SIGN DIFFERS from page text"),
+          ("wrong_row", "IN ANOTHER ROW"), ("row_unconfirmed", "ROW NOT CONFIRMED"))
 
 
 def norm_number(s: str) -> str:
-    """'1,200' -> '1200', '34.80' -> '34.8', '05' -> '5'."""
+    """'1,200' -> '1200', '34.80' -> '34.8', '05' -> '5'; '12,00' (not thousands groups) stays."""
+    s = s.rstrip(",")
+    if not GROUPED_RE.fullmatch(s):
+        return s
     s = s.replace(",", "")
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     return s.lstrip("0") or "0"
 
 
+def number_tokens(text: str) -> list:
+    """[{n, neg, est, start, end}]: neg is True for -x or (x), None for a date part (07/2024)."""
+    out = []
+    for m in NUM_RE.finditer(text):
+        est, lp, minus, raw, rp = m.groups()
+        if minus and m.start(3) > 0 and text[m.start(3) - 1].isalnum():
+            minus = None                                     # 2019-2020: a range dash
+        date = text[m.start(4) - 1:m.start(4)] == "/" or text[m.end(4):m.end(4) + 1] == "/"
+        out.append({"n": norm_number(raw), "neg": None if date else bool(minus or (lp and rp)),
+                    "est": bool(est), "start": m.start(), "end": m.end(), "raw": raw.rstrip(",")})
+    return out
+
+
 def numbers_in(text: str) -> set:
-    return {norm_number(m.group(2)) for m in NUM_RE.finditer(text) if not m.group(1)}
+    return {t["n"] for t in number_tokens(text) if not t["est"]}
+
+
+def _keys(text) -> set:
+    out = set()
+    for t in number_tokens(text):
+        if not t["est"]:
+            out |= {t["n"], t["n"] + "-"} if t["neg"] is None else {t["n"] + "-" * t["neg"]}
+    return out
+
+
+def _row_labels(answer) -> list:
+    """[(start, end, label)] for answer table rows whose first cell is text."""
+    out, pos = [], 0
+    for line in answer.splitlines(keepends=True):
+        st = line.strip()
+        if st.startswith("|") and not re.fullmatch(r"[|\-:\s]+", st):
+            lab = st.strip("|").split("|")[0].strip()
+            if len(lab) >= 2 and not number_tokens(lab):
+                out.append((pos, pos + len(line), lab))
+        pos += len(line)
+    return out
+
+
+def _label_values(source, labels) -> dict:
+    """label -> number keys next to it on the page: on each line where the label occurs, from the
+    label to the next other label on that line (nested labels share); if that stretch has no
+    number (values wrapped below the label), the line below."""
+    lines = source.splitlines()
+    pats = {lab: re.compile(r"(?<!\w)" + re.escape(lab.lower()) + r"(?!\w)") for lab in labels}
+    out = {}
+    for i, line in enumerate(lines):
+        low = line.lower()
+        hits = sorted((m.start(), m.end(), lab) for lab, pat in pats.items() for m in pat.finditer(low))
+        for st, en, lab in hits:
+            stop = next((h[0] for h in hits if h[0] >= en and h[2] != lab), len(line))
+            keys = _keys(line[en:stop])
+            if not keys and i + 1 < len(lines):
+                keys = _keys(lines[i + 1])
+            out.setdefault(lab, set()).update(keys)
+    return out
 
 
 def check_answer(answer: str, source: str):
-    """Mark unverified numbers in the answer. Returns (marked text, unverified, estimated)."""
-    known = numbers_in(source)
-    unverified, estimated = [], 0
-
-    def mark(m):
-        nonlocal estimated
-        if m.group(1):
+    """Mark numbers that don't match the page. Returns (marked text, issues, estimated):
+    issues = {unverified, sign, wrong_row, row_unconfirmed} -> lists of numbers as written;
+    the first three are marked with a warning sign in the text."""
+    seen = {}
+    for t in number_tokens(source):
+        if not t["est"]:
+            seen.setdefault(t["n"], []).append(t["neg"])
+    rows = _row_labels(answer)
+    near = _label_values(source, [r[2] for r in rows])
+    issues = {k: [] for k, _ in ISSUES}
+    estimated, out, last = 0, [], 0
+    for t in number_tokens(answer):
+        kind = None
+        if t["est"]:
             estimated += 1
-            return m.group(0)
-        if norm_number(m.group(2)) in known:
-            return m.group(0)
-        unverified.append(m.group(2))
-        return m.group(0) + " \u26a0"
-    marked = NUM_RE.sub(mark, answer)
-    return marked, unverified, estimated
+        elif t["n"] not in seen:
+            kind = "unverified"
+        elif not any(s is None or t["neg"] is None or s == t["neg"] for s in seen[t["n"]]):
+            kind = "sign"
+        else:
+            row = next((r for r in rows if r[0] <= t["start"] < r[1]), None)
+            if row and t["start"] - row[0] > len(row[2]):        # a value cell, not the label
+                want = {t["n"], t["n"] + "-"} if t["neg"] is None else {t["n"] + "-" * t["neg"]}
+                if not want & near.get(row[2], set()):
+                    if any(want & near.get(r[2], set()) for r in rows if r[2] != row[2]):
+                        kind = "wrong_row"
+                    else:
+                        issues["row_unconfirmed"].append(t["raw"])
+        out.append(answer[last:t["end"]] + (" ⚠" if kind else ""))
+        last = t["end"]
+        if kind:
+            issues[kind].append(t["raw"])
+    out.append(answer[last:])
+    return "".join(out), issues, estimated
 
 
 # ---- prepare ----
@@ -2302,7 +2387,7 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
     os.makedirs(os.path.join(work, "answers"), exist_ok=True)
     img_dir = os.path.join(work, "images")
     r = convert(src, mode=mode, page_range=page_range, max_pages=max_pages,
-                       password=password, page_markers=True, images="save",
+                       password=password, page_markers="every", images="save",
                        image_dir=img_dir, link_base=work)
     with open(os.path.join(work, "draft.md"), "w", encoding="utf-8") as f:
         f.write(r.markdown)
@@ -2358,22 +2443,20 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
 
 # ---- merge ----
 
-PAGE_SPLIT = re.compile(r"(?:^|\n\n)---\n\n<!-- page (\d+) -->\n?")
+PAGE_SPLIT = re.compile(r"<!-- page (\d+) -->\n?")
 
 
-def _split_pages(md: str, first_page: int) -> dict:
-    """draft.md -> {page: markdown}; the first page carries no marker."""
+def _split_pages(md: str) -> dict:
+    """draft.md (a marker before every page) -> {page: markdown}."""
     parts = PAGE_SPLIT.split(md)
-    pages = {first_page: parts[0].strip()}
-    pages.update({int(parts[i]): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)})
-    return pages
+    return {int(parts[i]): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
 
 
 def merge(work, page_markers=False):
     with open(os.path.join(work, "tasks.json"), encoding="utf-8") as f:
         manifest = json.load(f)
     with open(os.path.join(work, "draft.md"), encoding="utf-8") as f:
-        pages = _split_pages(f.read(), manifest["pages"][0] if manifest["pages"] else 1)
+        pages = _split_pages(f.read())
     report = []
     for t in manifest["tasks"]:
         ans_path = os.path.join(work, "answers", t["id"] + ".md")
@@ -2389,8 +2472,8 @@ def merge(work, page_markers=False):
             entry["status"] = "not a chart or table"
             report.append(entry)
             continue
-        marked, unverified, estimated = check_answer(answer, t["check_text"])
-        entry.update(status="merged", unverified=unverified, estimated=estimated)
+        marked, issues, estimated = check_answer(answer, t["check_text"])
+        entry.update(status="merged", estimated=estimated, **issues)
         if not t["check_text"].strip():
             entry["note"] = "no page text to check against (no OCR?): every number is unchecked"
         md = pages.get(t["page"], "")
@@ -2410,9 +2493,9 @@ def merge(work, page_markers=False):
         report.append(entry)
 
     out = []
-    for k, pn in enumerate(manifest["pages"]):
+    for pn in manifest["pages"]:
         body = pages.get(pn, "")
-        if page_markers and k:
+        if page_markers and out:
             out.append(PAGE_MARKER.format(n=pn))
         if body:
             out.append(body)
@@ -2426,8 +2509,9 @@ def summary(report) -> str:
     lines = []
     for e in report:
         s = f"{e['id']}: {e['status']}"
-        if e.get("unverified"):
-            s += f"; NOT FOUND in page text: {', '.join(e['unverified'])}"
+        for key, label in ISSUES:
+            if e.get(key):
+                s += f"; {label}: {', '.join(e[key])}"
         if e.get("estimated"):
             s += f"; {e['estimated']} estimated value(s)"
         if e.get("note"):
