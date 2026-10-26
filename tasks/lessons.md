@@ -4,3 +4,7 @@
   uses no API keys and no outside API calls (CLAUDE.md: the office runs skills + MCP only). Before planning
   any step that calls an outside service, check CLAUDE.md's environment notes; verify against local
   references instead (e.g. build the open-source crate Firecrawl uses and run it locally).
+- 2026-10-26: Recommended "hard text pages through the vision step" as next work from CLAUDE.md's open-work list;
+  it had already shipped in PR #6 from another session (the list was stale). Before recommending or planning
+  work, check main's git log and code for it (`git log --oneline origin/main | grep -i <topic>`), not just
+  the open-work list; fix the list when it's stale.
