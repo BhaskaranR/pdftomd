@@ -5,7 +5,7 @@ description: Convert a PDF to Markdown, including tables, scanned pages, and cha
 
 # PDF to Markdown
 
-Scripts are in `scripts/`. They need Python with `pdfplumber`, `pypdfium2` and `Pillow`;
+The script is `scripts/pdf2md.py`. It needs Python with `pdfplumber`, `pypdfium2` and `Pillow`;
 Tesseract (`pytesseract` + the `tesseract` program) is needed for scanned pages and
 for checking numbers on pictures.
 
@@ -14,7 +14,7 @@ for checking numbers on pictures.
 1. Prepare. Run:
 
    ```
-   python scripts/pdf2md_vision.py prepare <input.pdf> <work_folder>
+   python scripts/pdf2md.py prepare <input.pdf> <work_folder>
    ```
 
    It converts the PDF to `<work_folder>/draft.md` and writes `<work_folder>/tasks.json`:
@@ -39,7 +39,7 @@ for checking numbers on pictures.
 3. Merge. Run:
 
    ```
-   python scripts/pdf2md_vision.py merge <work_folder> -o <output.md>
+   python scripts/pdf2md.py merge <work_folder> -o <output.md>
    ```
 
    It checks every number in your answers against the page's own text (or OCR),

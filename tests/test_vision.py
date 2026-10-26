@@ -1,4 +1,4 @@
-"""Tests for pdf2md_vision.py (prepare -> model answers -> merge).
+"""Tests for the vision step in pdf2md.py (prepare -> model answers -> merge).
 The model is played by canned answers; all data is invented."""
 import json
 import os
@@ -8,10 +8,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-import pdf2md_vision as pv  # noqa: E402
-from test_layout import column_chart  # noqa: E402
+import pdf2md as pv  # noqa: E402
+from test_layout import column_chart, font  # noqa: E402
 
 fails = 0
+HAVE_OCR = pv.ocr_available()
 
 
 def check(name, cond, detail=""):
@@ -20,16 +21,24 @@ def check(name, cond, detail=""):
     fails += 0 if cond else 1
 
 
+def check_ocr(name, cond, detail=""):
+    """A check that needs Tesseract: skipped, not failed, when it isn't installed."""
+    if HAVE_OCR:
+        check(name, cond, detail)
+    else:
+        print(f"SKIP {name}  (needs Tesseract)")
+
+
+def entry(rep, tid):
+    return next(e for e in rep if e["id"] == tid)
+
+
 def scanned_table_pdf(path, angle=0):
     """A scanned page: heading, paragraph, a 3-column table and a bar chart, all pixels."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
     im = Image.new("RGB", (1700, 2200), "white")
     d = ImageDraw.Draw(im)
-    try:
-        big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 56)
-        f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 34)
-    except OSError:
-        big = f = ImageFont.load_default()
+    big, f = font(56, bold=True), font(34)
     d.text((150, 150), "Broker Review", font=big, fill="black")
     d.text((150, 280), "Scores for the period are shown below.", font=f, fill="black")
     rows = [("Broker", "Score", "Rank"), ("Alpha Securities", "34.8", "1"),
@@ -97,8 +106,9 @@ def test_scanned(angle):
         t = pages[0]
         from PIL import Image
         with Image.open(os.path.join(work, t["image"])) as im:
-            check(f"scan {angle}: page image upright (portrait)", im.height > im.width, im.size)
-        check(f"scan {angle}: OCR text available to check against", "34.8" in t["check_text"],
+            (check if angle == 0 else check_ocr)(
+                f"scan {angle}: page image upright (portrait)", im.height > im.width, im.size)
+        check_ocr(f"scan {angle}: OCR text available to check against", "34.8" in t["check_text"],
               t["check_text"][:300])
         answer = ("# Broker Review\n\nScores for the period are shown below.\n\n"
                   "| Broker | Score | Rank |\n|---|---|---|\n| Alpha Securities | 34.8 | 1 |\n"
@@ -107,8 +117,10 @@ def test_scanned(angle):
                   "| Gamma | 17.5 |\n| Delta | 12.9 |\n")
         write_answer(work, t["id"], answer)
         md, rep = pv.merge(work, page_markers=True)
-        check(f"scan {angle}: table in output", "| Alpha Securities | 34.8 | 1 |" in md, md)
-        check(f"scan {angle}: invented row flagged", "12.9 ⚠" in md and rep[0]["unverified"] == ["12.9"], rep)
+        check(f"scan {angle}: table in output", "| Alpha Securities | 34.8" in md, md)
+        check_ocr(f"scan {angle}: printed values not flagged", "| Alpha Securities | 34.8 | 1 |" in md, md)
+        check_ocr(f"scan {angle}: invented row flagged",
+                  "12.9 ⚠" in md and entry(rep, t["id"])["unverified"] == ["12.9"], rep)
         check(f"scan {angle}: scan image linked", "![Page 1 (scan)](scans/page_1.png)" in md)
         check(f"scan {angle}: page marker kept on request", "<!-- page 1 -->" in md)
 
@@ -121,8 +133,9 @@ def test_missing_answer():
         with open(os.path.join(work, "draft.md")) as fh:
             draft = fh.read()
         md, rep = pv.merge(work)
-        check("no answer: OCR output kept", "Broker Review" in md and "scan)" not in md, md)
-        check("no answer: reported", rep[0]["status"].startswith("no answer"), rep)
+        check_ocr("no answer: OCR output kept", "Broker Review" in md, md)
+        check("no answer: scan not linked", "scan)" not in md, md)
+        check("no answer: reported", entry(rep, "p1_page")["status"].startswith("no answer"), rep)
         check("no answer: same text as draft", md.strip() == draft.replace("<!-- page 1 -->", "").strip())
 
 
@@ -145,5 +158,7 @@ if __name__ == "__main__":
         test_scanned(a)
     test_missing_answer()
     test_cli()
+    if not HAVE_OCR:
+        print("Tesseract not installed: OCR checks skipped")
     print("all passed" if not fails else f"{fails} FAILED")
     sys.exit(1 if fails else 0)

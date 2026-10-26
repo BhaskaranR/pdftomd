@@ -87,18 +87,18 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 
 ## Charts and scanned pages (vision step)
 
-`pdf2md_vision.py` adds chart data and scanned-page structure using the agent's own vision
+The `prepare` and `merge` commands of `pdf2md.py` add chart data and scanned-page structure using the agent's own vision
 model (e.g. GPT-4o inside a skill), so no API keys are needed:
 
 ```bash
-python pdf2md_vision.py prepare report.pdf work/   # draft.md, images, tasks.json (one prompt per image)
+python pdf2md.py prepare report.pdf work/   # draft.md, images, tasks.json (one prompt per image)
 # the agent answers each task into work/answers/<id>.md
-python pdf2md_vision.py merge work/ -o report.md   # every number checked against page text / OCR
+python pdf2md.py merge work/ -o report.md   # every number checked against page text / OCR
 ```
 
 Numbers not found in the page's own text are marked ⚠; values read off a drawing are written `~42`.
 Missing answers keep the plain pdf2md output. `skill/` is a ready skill folder (SKILL.md + scripts).
-Tests: `python tests/test_vision.py`.
+Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped without it).
 
 ## Limits
 

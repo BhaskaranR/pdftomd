@@ -4,7 +4,7 @@ headers/footers, and a scanned page."""
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -12,6 +12,9 @@ from reportlab.lib.units import inch
 from reportlab.platypus import (BaseDocTemplate, Frame, Image as RLImage, NextPageTemplate,
                                 PageBreak, PageTemplate, Paragraph, Preformatted, Spacer,
                                 Table, TableStyle, ListFlowable, ListItem)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fonts import font  # noqa: E402
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "samples"
 os.makedirs(OUT, exist_ok=True)
@@ -109,11 +112,7 @@ doc.build(story)
 # scanned page: text rendered into an image, wrapped in a PDF
 scan = Image.new("RGB", (1700, 2200), "white")
 d = ImageDraw.Draw(scan)
-try:
-    f_big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-    f = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", 34)
-except OSError:
-    f_big = f = ImageFont.load_default()
+f_big, f = font(60, bold=True), font(34, serif=True)
 d.text((150, 150), "Scanned Invoice", font=f_big, fill="black")
 y = 300
 for ln in ["Invoice number: 10442", "Date: 14 October 2026",
