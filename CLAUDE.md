@@ -1,19 +1,21 @@
 # pdftomd — notes for Claude Code
 
-Single-file PDF → Markdown converter (`pdf2md.py`) with a Firecrawl-compatible API.
+PDF → Markdown converter (`pdf2md.py`) with a Firecrawl-compatible API; one file per document format.
 Heuristics are ported from Firecrawl's MIT-licensed `pdf-inspector` Rust crate
 (https://github.com/firecrawl/pdf-inspector) and rebuilt on pdfplumber.
 Spreadsheets (xlsx, xlsm, csv) go through `sheet2md.py`, a port of Firecrawl's MIT-licensed `anydoc`
 crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOSSARY.md`.
 
 ## Layout
-- `pdf2md.py` — everything: extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
+- One file per document format, each self-contained: `pdf2md.py` (PDFs, vision step, `scrape()` routing),
+  `sheet2md.py` (spreadsheets); a future Word/PowerPoint converter gets its own file. `scrape()` imports the other
+  files lazily. Don't fold formats into one file. Never commit copies: `skill/SKILL.md` = the skill's instructions;
+  `python make_skill.py` builds the installable folder in `dist/pdf-to-markdown/` from the real files (add new ones to its FILES).
+- `pdf2md.py` — extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
-  scanned pages; number check against page text/OCR). Keep it one file. `skill/SKILL.md` = the skill's instructions; `python make_skill.py` builds the
-  installable folder in `dist/pdf-to-markdown/` (SKILL.md + scripts/pdf2md.py copy). Never commit a copy of pdf2md.py.
-  Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
+  scanned pages; number check against page text/OCR). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
 - `sheet2md.py` — spreadsheets: zip+XML reader (stdlib only), number formats, header-row guess, GFM tables, CSV,
-  opt-in chart tables. `convert()`, CLI. Separate file for now; `make_skill.py` ships it next to pdf2md.py. Tests: `tests/test_sheet.py`.
+  opt-in chart tables. `convert()`, CLI. Tests: `tests/test_sheet.py`.
 - `tests/make_workbooks.py` — synthetic workbooks + CSVs; `tests/out/workbooks/*.md` = anydoc's output for them.
   `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs sheet2md against it.
 - `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` (pdf2md.py), `fingerprints_sheet.txt`
@@ -70,6 +72,9 @@ default: chart caches → tables; default output must stay byte-equal to anydoc)
 - Reference = anydoc 0.2.4, the release Firecrawl's API resolves to (it pins "0.2.2", no lockfile). Unreleased
   anydoc weighs a repeated header label less; when a new 0.2.x ships, bump tests/anyref, rerun compare, port diffs.
   No openpyxl — it would change values (its own date detection); read the XML directly like anydoc.
+- One file per format, not one file for everything (2026-10-26): folding spreadsheets in made pdf2md.py ~4,700 lines
+  and growing with each format (PR #3, closed). The old one-file rule was about committed copies drifting;
+  make_skill.py building the skill from the real files solves that with several files too.
 
 ## Open work
 1. LICENSE (owner to choose; MIT suggested). NOTICE done (pdf-inspector + anydoc).
