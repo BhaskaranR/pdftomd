@@ -24,6 +24,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs sheet2md against it.
 - `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` (pdf2md.py), `fingerprints_sheet.txt`
   (sheet2md.py), `fingerprints_chunk.txt` (chunk2md.py) — per-function fingerprints for checking a retyped copy.
+  The same lists live inside each code file: `python3 pdf2md.py --verify` (etc.) checks a copy with nothing else;
+  `make_handover.py --refresh` keeps them current. Code files stay plain ASCII (non-ASCII as \uXXXX escapes).
 - `tests/make_samples.py` — builds `tests/samples/report.pdf` and `scanned.pdf` (needs reportlab).
 - `tests/fonts.py` — `font()` for drawing synthetic scans (DejaVu on Linux, Arial/Times on macOS).
 - `tests/out/report.md`, `report.json` — expected output for the sample report.
@@ -65,7 +67,9 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
   - `python tests/test_sheet.py` (must print all passed)
   - `python tests/test_chunk.py` (must print all passed)
   - `python tests/test_fonts.py` (must print all passed)
-- Any code change invalidates the fingerprints: regenerate with
+  - `python tests/test_handover.py` (must print all passed: code files plain ASCII, built-in check current)
+- Any code change invalidates the fingerprints: run `python3 make_handover.py --refresh` (the list inside each
+  code file, used by `python3 <file> --verify`), and regenerate the list files with
   `python verify_transcription.py pdf2md.py > fingerprints.txt` and rebuild `fingerprints_2col.txt`
   (first half left, second half right, left column padded to its widest entry + 2);
   `python verify_transcription.py sheet2md.py > fingerprints_sheet.txt`.

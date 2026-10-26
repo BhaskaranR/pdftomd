@@ -9,8 +9,8 @@ d22aaca5 FURNITURE_MIN_PAGES        cf1ec254 spans_gutter
 0f4111ec FURNITURE_PAGE_FRACTION    454ce672 fills_columns
 77b86762 FURNITURE_Y_STDDEV         cd6043c0 reading_order
 2c5ba94a MIN_IMAGE_PT               c778cfbe set_colw
-12086f97 BULLETS                    19496748 normalize_for_comparison
-f9d1dc74 BULLET_RE                  c22b043d is_structural
+1bc6c5eb BULLETS                    19496748 normalize_for_comparison
+68a55cb7 BULLET_RE                  c22b043d is_structural
 21f3a276 NUMBERED_RE                47a8e16a PAGE_NUM_RE
 e07b829a MONO_RE                    ba0627dd line_text
 caab2860 BOLD_RE                    6b534385 EXPLICIT_PAGE_NUM_RE
@@ -26,7 +26,7 @@ e4a35ae6 mass_fraction              0acdb09d styled_text
 06dd0dff dominant_size              f72dbe3f join_paragraph
 e1051b20 join_words                 f1ea6914 CAPTION_RE
 9ff6c2e3 overlaps                   c8328707 box_of
-a7497be1 center_inside              aaf62736 render_blocks
+a7497be1 center_inside              a304ba92 render_blocks
 cb4b19d9 parse_pages                d5a7e4ae postprocess_fragment
 82f6e571 md_escape_cell             622593b6 overlap_fraction
 8e04e66b table_to_md                eccff5ef union_box
@@ -61,7 +61,7 @@ cd1a1d68 header_ruled               101a2d42 norm_number
 20a6cea1 PROSE_RUN_ON               aa0807ca number_tokens
 354a5b1f PROSE_MAX_DIGITS           5d267a64 numbers_in
 14c4da6c runs_on_like_prose         db6a296d _keys
-960f8187 heuristic_tables           8505ccbd ROW_CELL_MAX_WORDS
+7c0a91bb heuristic_tables           8505ccbd ROW_CELL_MAX_WORDS
 2b42393b page_images                71f9462b _row_labels
 3070c80e render_region              5f5be5ef _label_values
 4202ef54 save_image                 ffcf6807 check_answer
@@ -85,4 +85,4 @@ eee12ad6 vector_figures             b1a7a5f3 error_text
 d924216f _OCR_WARNED                f6f870b1 main
 9a508bc9 ocr_blocks                 a3f20c3b _fingerprints
 d17fc54d detect_rotation            cc642faa verify
-b504d738 ocr_available              ca585aa5 FINGERPRINTS
+b504d738 ocr_available              73a07ad1 FINGERPRINTS

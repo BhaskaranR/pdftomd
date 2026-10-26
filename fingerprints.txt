@@ -9,8 +9,8 @@ d22aaca5 FURNITURE_MIN_PAGES
 0f4111ec FURNITURE_PAGE_FRACTION
 77b86762 FURNITURE_Y_STDDEV
 2c5ba94a MIN_IMAGE_PT
-12086f97 BULLETS
-f9d1dc74 BULLET_RE
+1bc6c5eb BULLETS
+68a55cb7 BULLET_RE
 21f3a276 NUMBERED_RE
 e07b829a MONO_RE
 caab2860 BOLD_RE
@@ -61,7 +61,7 @@ cd1a1d68 header_ruled
 20a6cea1 PROSE_RUN_ON
 354a5b1f PROSE_MAX_DIGITS
 14c4da6c runs_on_like_prose
-960f8187 heuristic_tables
+7c0a91bb heuristic_tables
 2b42393b page_images
 3070c80e render_region
 4202ef54 save_image
@@ -114,7 +114,7 @@ a1f91997 hanging_number
 f72dbe3f join_paragraph
 f1ea6914 CAPTION_RE
 c8328707 box_of
-aaf62736 render_blocks
+a304ba92 render_blocks
 d5a7e4ae postprocess_fragment
 622593b6 overlap_fraction
 eccff5ef union_box
@@ -173,4 +173,4 @@ b1a7a5f3 error_text
 f6f870b1 main
 a3f20c3b _fingerprints
 cc642faa verify
-ca585aa5 FINGERPRINTS
+73a07ad1 FINGERPRINTS

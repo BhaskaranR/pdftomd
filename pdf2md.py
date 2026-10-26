@@ -72,8 +72,11 @@ FURNITURE_PAGE_FRACTION = 0.30
 FURNITURE_Y_STDDEV = 0.05
 MIN_IMAGE_PT = 24                   # ignore tiny images (icons, bullets, rules)
 
-BULLETS = "\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714-\u2013\u2014*"
-BULLET_RE = re.compile(r"^\s*([\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6\u25c7\u25ba\u25b8\u27a2\u27a4]|[-\u2713\u2714\u2013\u2014*](?=\s))\s*")   # ticks/dashes need a space
+BULLETS = ("\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6\u25c7\u25ba\u25b8"
+           "\u27a2\u27a4\u2713\u2714-\u2013\u2014*")
+# ticks/dashes need a space after them
+BULLET_RE = re.compile(r"^\s*([\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6"
+                       r"\u25c7\u25ba\u25b8\u27a2\u27a4]|[-\u2713\u2714\u2013\u2014*](?=\s))\s*")
 NUMBERED_RE = re.compile(
     r"^\s*(\(?(\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])\s+(?=\S)", re.I)
 MONO_RE = re.compile(r"mono|courier|consol|menlo|inconsolata|code|typewriter|"
@@ -850,7 +853,8 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
                                         min(l.x0 for l in rows_lines))
         firsts = [segments(l)[0] for l in rows_lines]
         markerish = sum(1 for f in firsts if len(f) == 1 and (
-            re.fullmatch(r"[\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714*\-\u2013\u2014]|\(?\w{1,3}[.)]?", f[0].text)
+            re.fullmatch(r"[\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6"
+                         r"\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714*\-\u2013\u2014]|\(?\w{1,3}[.)]?", f[0].text)
             or f[0].text == CID_MARK))
         if markerish == len(firsts) and all(len(segments(l)) == 2 for l in rows_lines):
             i = best_j + 1
@@ -1950,7 +1954,9 @@ def render_blocks(ordered, base, tiers, col_width, image_md) -> list:
             flush_list()
             marker, rest_plain = list_marker(text)
             first = ln.words[0].text.strip()
-            if len(ln.words) > 1 and (re.fullmatch(r"[\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714*\-\u2013\u2014]", first)
+            if len(ln.words) > 1 and (re.fullmatch(r"[\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043"
+                                                   r"\u2219\u00b7\u25c6\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714*\-"
+                                                   r"\u2013\u2014]", first)
                                       or re.fullmatch(r"\(?\d{1,3}[.)]", first)):
                 rest = styled_text(ln.words[1:])   # keep inline styling
                 if first in "\u2713\u2714":
@@ -3211,7 +3217,7 @@ def main(argv=None):
 
 
 # ---- transcription check -----------------------------------------------------------------------
-# After this file is copied out of a PDF (or retyped), `python3 <this file> --verify` compares every
+# After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
 # function and constant with the fingerprints below; whitespace and comments don't count, any change
 # to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
 
@@ -3283,8 +3289,8 @@ d22aaca5 FURNITURE_MIN_PAGES
 0f4111ec FURNITURE_PAGE_FRACTION
 77b86762 FURNITURE_Y_STDDEV
 2c5ba94a MIN_IMAGE_PT
-12086f97 BULLETS
-f9d1dc74 BULLET_RE
+1bc6c5eb BULLETS
+68a55cb7 BULLET_RE
 21f3a276 NUMBERED_RE
 e07b829a MONO_RE
 caab2860 BOLD_RE
@@ -3335,7 +3341,7 @@ cd1a1d68 header_ruled
 20a6cea1 PROSE_RUN_ON
 354a5b1f PROSE_MAX_DIGITS
 14c4da6c runs_on_like_prose
-960f8187 heuristic_tables
+7c0a91bb heuristic_tables
 2b42393b page_images
 3070c80e render_region
 4202ef54 save_image
@@ -3388,7 +3394,7 @@ a1f91997 hanging_number
 f72dbe3f join_paragraph
 f1ea6914 CAPTION_RE
 c8328707 box_of
-aaf62736 render_blocks
+a304ba92 render_blocks
 d5a7e4ae postprocess_fragment
 622593b6 overlap_fraction
 eccff5ef union_box

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Hand the code over as PDFs, with a check built into each file.
+"""Keep the check built into each code file current.
 
   python3 make_handover.py --refresh   # after a code change: rewrite each file's fingerprint list
-  python3 make_handover.py             # -> dist/handover/<file>.pdf for pdf2md.py, sheet2md.py, chunk2md.py
 
-On the other side, after copying the code out of a PDF into pdf2md.py (etc.):
+After a file has been copied or retyped somewhere else:
 
   python3 pdf2md.py --verify           # "all N functions and constants match", or the names that differ
 """
@@ -20,7 +19,7 @@ MARK = "# ---- transcription check "
 # The section added to the end of each file (before its `if __name__ == "__main__":`). The same rules
 # as verify_transcription.py: code, numbers and string text count; whitespace and comments don't.
 SECTION = '''# ---- transcription check -----------------------------------------------------------------------
-# After this file is copied out of a PDF (or retyped), `python3 <this file> --verify` compares every
+# After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
 # function and constant with the fingerprints below; whitespace and comments don't count, any change
 # to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
 
@@ -130,13 +129,13 @@ def refresh(path: str) -> bool:
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--refresh", action="store_true", help="rewrite each file's fingerprint list")
-    ap.add_argument("--out", default=os.path.join(HERE, "dist", "handover"))
     a = ap.parse_args(argv)
-    if a.refresh:
-        for name in CODE:
-            print(f"{name}: {'updated' if refresh(os.path.join(HERE, name)) else 'already current'}")
+    if not a.refresh:
+        ap.print_help()
         return 0
-    sys.exit("PDF build not added yet")
+    for name in CODE:
+        print(f"{name}: {'updated' if refresh(os.path.join(HERE, name)) else 'already current'}")
+    return 0
 
 
 if __name__ == "__main__":

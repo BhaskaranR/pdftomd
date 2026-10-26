@@ -2170,7 +2170,7 @@ def main(argv=None):
 
 
 # ---- transcription check -----------------------------------------------------------------------
-# After this file is copied out of a PDF (or retyped), `python3 <this file> --verify` compares every
+# After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
 # function and constant with the fingerprints below; whitespace and comments don't count, any change
 # to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
 

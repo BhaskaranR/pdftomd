@@ -1,4 +1,4 @@
-"""Handover checks: the code files survive being sent as PDFs and copied back out.
+"""Handover checks: the code files survive being copied elsewhere (plain ASCII, built-in --verify).
 Run: python tests/test_handover.py            (exit code 0 = all passed)"""
 import os
 import re
@@ -20,7 +20,7 @@ def check(name, cond, detail=""):
 
 
 def test_ascii():
-    """A PDF's monospace font and copy-paste keep plain ASCII; invisible or symbol characters get lost."""
+    """Copying keeps plain ASCII; invisible or symbol characters can get lost on the way."""
     for name in CODE:
         src = open(os.path.join(ROOT, name), encoding="utf-8").read()
         bad = [(n + 1, line.strip()[:60]) for n, line in enumerate(src.splitlines()) if any(ord(c) > 127 for c in line)]

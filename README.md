@@ -241,7 +241,19 @@ python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scoreca
 
 ## Transcription check
 
-If you retype or OCR this code into another environment, verify the copy:
+If you copy, retype or OCR this code into another environment, each file checks itself:
+
+```bash
+python3 pdf2md.py --verify        # "all N functions and constants match", or the names that differ
+python3 sheet2md.py --verify
+python3 chunk2md.py --verify
+```
+
+Nothing else is needed on the other side: the fingerprint list is inside each file. After a code
+change, `python3 make_handover.py --refresh` rewrites those lists (tests/test_handover.py fails if one
+is stale). The code files are plain ASCII, so nothing is lost in copying.
+
+The separate list files below do the same from outside the file:
 
 ```bash
 python verify_transcription.py pdf2md.py > mine.txt
