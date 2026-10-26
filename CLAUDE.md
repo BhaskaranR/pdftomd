@@ -38,7 +38,7 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 7. Document markdown assembled fragment by fragment so every block's `markdownSpan` is exact.
 
 ## Firecrawl contract (keep it exact)
-`scrape(url, formats, parsers)`: parsers default `["pdf","image"]`, `[]` → base64. PDF options `mode` fast|auto|ocr,
+`scrape(url, formats, parsers)`: parsers default `["pdf","image"]`, `[]` → the PDF base64'd in `markdown`. PDF options `mode` fast|auto|ocr,
 `maxPages` (1–10000), `pages`, `blocks`, `pageMarkers` (booleans only; markers = `---` + `<!-- page N -->` between
 pages, none before the first). `fast` on a Scanned/ImageBased PDF raises `SCRAPE_PDF_OCR_REQUIRED`; non-PDF that
 isn't an image, or an image with the image parser off, raises `SCRAPE_UNSUPPORTED_FILE_ERROR`. Vision step needs Tesseract.
@@ -47,12 +47,13 @@ Spreadsheets: found by URL path/file name → Content-Type → bytes (PDF bytes 
 byte-equal to anydoc's (visible sheets only, `## name` only when >1, header row guessed, number formats,
 ISO dates). Extras: `include_hidden`, `filename`, unsaved-formula count in `data.warning`, `charts` (off by
 default: chart caches → tables; default output must stay byte-equal to anydoc). PDF options ignored;
-`parsers: []` → base64. Errors carry `code`: `SPREADSHEET_TOO_LARGE|ENCRYPTED|UNSUPPORTED|UNREADABLE`.
+`parsers: []` → base64 in `markdown`. Errors carry `code`: `SPREADSHEET_TOO_LARGE|ENCRYPTED|UNSUPPORTED|UNREADABLE`.
 
 ## Rules when changing code
 - Run before committing:
   - `python tests/test_layout.py` and `python tests/test_contract.py` (must print all passed)
-  - `python tests/make_samples.py tests/samples && python pdf2md.py tests/samples/report.pdf --images none -o /tmp/r.md && diff /tmp/r.md tests/out/report.md`
+  - `python tests/make_samples.py tests/samples && python pdf2md.py tests/samples/report.pdf -o /tmp/report.md && diff /tmp/report.md tests/out/report.md`
+    (the expected file links its image as `report_images/…`, so the output must be named `report.md`)
   - compare old vs new output on a corpus of real PDFs and review every changed file
   - check that every block's `markdownSpan` slices to its `content` (`--blocks` JSON).
   - `python tests/test_sheet.py` (must print all passed)

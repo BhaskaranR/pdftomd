@@ -23,6 +23,9 @@ FILES = {"SKILL.md": "skill/SKILL.md",
 
 def build(out):
     if os.path.exists(out):
+        if os.listdir(out) and not os.path.isfile(os.path.join(out, "SKILL.md")):
+            raise SystemExit(f"error: {out} is not empty and is not a built skill (no SKILL.md); "
+                             "pick another --out")
         shutil.rmtree(out)
     for dest, src in FILES.items():
         path = os.path.join(out, dest)

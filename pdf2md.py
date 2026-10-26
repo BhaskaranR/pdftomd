@@ -29,7 +29,7 @@ Usage:
   python pdf2md.py input.pdf -o out.md            # images saved to out_images/
   python pdf2md.py https://example.com/doc.pdf -o out.md
   python pdf2md.py input.pdf --images embed       # base64 data URIs
-  python pdf2md.py input.pdf --images none --pages 1-5 --ocr
+  python pdf2md.py input.pdf --images none --page-range 1-5 --mode ocr
   python pdf2md.py prepare input.pdf work/       # vision step, see section 12
   python pdf2md.py merge work/ -o out.md
 
@@ -1754,8 +1754,8 @@ class UnsupportedFileError(ValueError):
     def __init__(self, reason):
         super().__init__(
             f"The file type cannot be processed: {reason}. Supported are PDFs and raster "
-            f'images (PNG, JPEG, TIFF, GIF, BMP, WebP), which are OCR\'d when the parsers '
-            f'option includes "image" (the default).')
+            f"images (PNG, JPEG, JPEG 2000, TIFF, GIF, BMP, WebP, AVIF with Pillow 11.3+), "
+            f'which are OCR\'d when the parsers option includes "image" (the default).')
         self.reason = reason
 
 
@@ -2096,21 +2096,46 @@ def is_pdf_buffer(data: bytes) -> bool:
     return b"%PDF" in data[:1024]
 
 
+PDF_OPTIONS = {"type", "mode", "maxPages", "pages", "blocks", "pageMarkers", "pageMarkdown", "images"}
+
+
+def _pdf_options(opts: dict) -> dict:
+    """Check one pdf parser object like Firecrawl's schema (strict object, typed fields) and
+    fold the deprecated `pageMarkdown` into `pages` (an explicit `pages` wins)."""
+    unknown = set(opts) - PDF_OPTIONS
+    if unknown:
+        raise ValueError(f"unknown pdf parser options: {sorted(unknown)}")
+    if "mode" in opts and opts["mode"] not in ("fast", "auto", "ocr"):
+        raise ValueError("mode must be 'fast', 'auto' or 'ocr'")
+    for opt in ("pages", "blocks", "pageMarkers", "pageMarkdown"):       # z.boolean()
+        if opt in opts and not isinstance(opts[opt], bool):
+            raise ValueError(f"{opt} must be true or false")
+    if "maxPages" in opts:                                               # z.int(), 1..10000
+        mp = opts["maxPages"]
+        if isinstance(mp, float) and mp.is_integer():
+            mp = int(mp)                                                 # JSON 2.0 is the integer 2
+        if isinstance(mp, bool) or not isinstance(mp, int) or not 1 <= mp <= 10000:
+            raise ValueError("maxPages must be an integer from 1 to 10000")
+        opts["maxPages"] = mp
+    alias = opts.pop("pageMarkdown", None)
+    if "pages" not in opts and alias is not None:
+        opts["pages"] = alias
+    return opts
+
+
 def _parser_opts(parsers):
     """Normalize Firecrawl `parsers` -> (pdf_options or None, image_enabled).
     As in Firecrawl's schema: only "pdf" and "image" (string or object form), the
-    image object takes no options, and the deprecated pdf option `pageMarkdown`
-    folds into `pages` (an explicit `pages` wins)."""
+    image object takes no options, every pdf parser's options are checked for any
+    input, and the first pdf parser is the one used."""
     if parsers is None:
         parsers = ["pdf", "image"]
     pdf_opts, image_on = None, False
     for p in parsers:
         ptype = p if isinstance(p, str) else p.get("type") if isinstance(p, dict) else None
         if ptype == "pdf":
-            pdf_opts = {} if isinstance(p, str) else dict(p)
-            alias = pdf_opts.pop("pageMarkdown", None)
-            if pdf_opts.get("pages") is None and alias is not None:
-                pdf_opts["pages"] = alias
+            opts = _pdf_options({} if isinstance(p, str) else dict(p))
+            pdf_opts = opts if pdf_opts is None else pdf_opts
         elif ptype == "image":
             extra = sorted(set(p) - {"type"}) if isinstance(p, dict) else []
             if extra:
@@ -2128,8 +2153,8 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
            include_hidden: bool = False, filename: Optional[str] = None,
            charts: bool = False) -> dict:
     """Firecrawl /scrape-compatible call for PDFs, images and spreadsheets.
-    parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file as
-    base64. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
+    parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file base64'd
+    in `markdown`. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
     "maxPages": int, "pages": bool, "blocks": bool, "pageMarkers": bool}.
     Extras (not in Firecrawl): "images": "save"|"embed"|"none" (default: "save"
     when image_dir is given, otherwise "embed" — no files are written unasked),
@@ -2150,8 +2175,8 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     warnings = [f"format '{f}' is not supported for files; ignored"
                 for f in formats if f != "markdown"]
 
-    def raw():
-        return {"success": True, "data": {"base64": base64.b64encode(data).decode(),
+    def raw():                  # Firecrawl: the file base64'd as the content (html = markdown)
+        return {"success": True, "data": {"markdown": base64.b64encode(data).decode(),
                                           "metadata": meta}}
 
     sheet_ext = None
@@ -2174,17 +2199,6 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     elif is_pdf:
         if pdf_opts is None:
             return raw()
-        unknown = set(pdf_opts) - {"type", "mode", "maxPages", "pages", "blocks",
-                                   "pageMarkers", "images"}
-        if unknown:
-            raise ValueError(f"unknown pdf parser options: {sorted(unknown)}")
-        for opt in ("pages", "blocks", "pageMarkers"):         # Firecrawl: z.boolean()
-            if opt in pdf_opts and not isinstance(pdf_opts[opt], bool):
-                raise ValueError(f"{opt} must be true or false")
-        mp = pdf_opts.get("maxPages", 1)                      # Firecrawl: int 1..10000
-        if "maxPages" in pdf_opts and (isinstance(mp, bool) or not isinstance(mp, int)
-                                       or not 1 <= mp <= 10000):
-            raise ValueError("maxPages must be an integer from 1 to 10000")
         r = convert(data, mode=pdf_opts.get("mode", "auto"), max_pages=pdf_opts.get("maxPages"),
                     page_range=page_range, page_markers=pdf_opts.get("pageMarkers", False),
                     images=pdf_opts.get("images", images), image_dir=image_dir,
@@ -2567,16 +2581,18 @@ def vision_main(argv):
     m.add_argument("-o", "--output", help="markdown file (default: print)")
     m.add_argument("--page-markers", action="store_true")
     a = ap.parse_args(argv)
-    if a.cmd == "prepare":
-        try:
+    try:
+        if a.cmd == "prepare":
             man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password)
-        except RuntimeError as e:
-            sys.exit(f"error: {e}")
+        else:
+            md, report = merge(a.work, a.page_markers)
+    except Exception as e:  # noqa: BLE001 -- one clean line, as for plain conversion
+        sys.exit(f"error: {error_text(e, getattr(a, 'password', None))}")
+    if a.cmd == "prepare":
         print(f"{len(man['tasks'])} image task(s) in {os.path.join(a.work, 'tasks.json')}")
         for t in man["tasks"]:
             print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}")
         return
-    md, report = merge(a.work, a.page_markers)
     if a.output:
         with open(a.output, "w", encoding="utf-8") as f:
             f.write(md)
@@ -2585,13 +2601,30 @@ def vision_main(argv):
     print(summary(report), file=sys.stderr)
 
 
+def error_text(e, password=None) -> str:
+    """One-line CLI message for an exception; Firecrawl error codes first."""
+    msg = repr(e) + " " + repr(getattr(e, "__cause__", ""))
+    if "PDFPasswordIncorrect" in msg:                     # pdfminer wraps password errors
+        return "incorrect password" if password else "this PDF is encrypted — pass --password"
+    if isinstance(e, FileNotFoundError):
+        return f"file not found: {e.filename}"
+    text = str(e) or type(e).__name__
+    code = getattr(e, "code", None)
+    return f"{code}: {text}" if isinstance(code, str) else text
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] in ("prepare", "merge"):
         return vision_main(argv)
     ap = argparse.ArgumentParser(
         description="PDF to Markdown with Firecrawl-style options "
-                    "(headings, paragraphs, lists, tables, images, OCR).")
+                    "(headings, paragraphs, lists, tables, images, OCR).",
+        epilog="vision step (charts, pictures, scanned pages; needs Tesseract):\n"
+               "  pdf2md.py prepare <pdf> <work>   then the agent answers work/answers/<id>.md\n"
+               "  pdf2md.py merge <work> -o out.md\n"
+               "  see: pdf2md.py prepare --help, pdf2md.py merge --help",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", help="PDF, image or spreadsheet (xlsx, xlsm, csv): path or http(s) URL")
     ap.add_argument("-o", "--output", help="output file (default: stdout)")
     ap.add_argument("--mode", choices=["fast", "auto", "ocr"], default="auto",
@@ -2646,21 +2679,20 @@ def main(argv=None):
                       image_dir=image_dir, link_base=out_dir, ocr_lang=a.ocr_lang,
                       page_range=a.page_range, image_dpi=a.image_dpi,
                       include_hidden=a.include_hidden, charts=a.charts)
-    except Exception as e:  # pdfminer wraps password / corruption errors
-        msg = repr(e) + " " + repr(getattr(e, "__cause__", ""))
-        if "PDFPasswordIncorrect" in msg:
-            sys.exit("error: incorrect password" if a.password else
-                     "error: this PDF is encrypted — pass --password")
-        code = getattr(e, "code", None)
-        sys.exit(f"error: {code + ': ' if isinstance(code, str) else ''}{e or type(e).__name__}")
+    except Exception as e:  # noqa: BLE001 -- pdfminer wraps password / corruption errors
+        text = error_text(e, a.password)
+        if want_json:                                     # Firecrawl-style error body
+            code = getattr(e, "code", None)
+            print(json.dumps({"success": False, "code": code if isinstance(code, str) else None,
+                              "error": text.split(": ", 1)[-1] if isinstance(code, str) else text},
+                             ensure_ascii=False, indent=2))
+        sys.exit(f"error: {text}")
 
     d = resp["data"]
     if want_json:
         text = json.dumps(resp, ensure_ascii=False, indent=2) + "\n"
-    elif "markdown" in d:
-        text = d["markdown"]
     else:
-        text = d.get("base64", "")
+        text = d.get("markdown", "")
     if a.output:
         with open(a.output, "w", encoding="utf-8") as f:
             f.write(text)

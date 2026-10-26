@@ -393,7 +393,7 @@ def routing():
        (sheet2md.CONTENT_TYPE_OF[".xlsx"], 1, ["Stock"]))
     check("scrape: no pdf fields", "pdfType" not in m, m)
     raw = pdf2md.scrape(xl, parsers=[])
-    eq("scrape: parsers [] -> base64", base64.b64decode(raw["data"].get("base64", "")), xl)
+    eq("scrape: parsers [] -> base64 in markdown", base64.b64decode(raw["data"].get("markdown", "")), xl)
     eq("scrape: pdf-only parsers still convert", pdf2md.scrape(
         xl, parsers=[{"type": "pdf", "mode": "fast", "maxPages": 1, "pages": True, "blocks": True}])
        ["data"].get("markdown"), table)

@@ -20,7 +20,7 @@ Same names and behaviour as Firecrawl's PDF parser
 
 | Firecrawl option | CLI flag | Meaning |
 |---|---|---|
-| `parsers` (default `["pdf","image"]`) | `--parsers '<json>'` | `[]` returns a PDF as base64 instead of parsing |
+| `parsers` (default `["pdf","image"]`) | `--parsers '<json>'` | `[]` returns the PDF base64'd in `markdown` instead of parsing (as Firecrawl does) |
 | `mode: "fast"` | `--mode fast` | embedded text only; scanned pages are skipped, and a fully scanned PDF raises `SCRAPE_PDF_OCR_REQUIRED` (as Firecrawl does) |
 | `mode: "auto"` (default) | `--mode auto` | embedded text, OCR only for pages with no text layer |
 | `mode: "ocr"` | `--mode ocr` | OCR every page |
@@ -167,7 +167,11 @@ Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped wit
 - Side-by-side tables are only split when rule lines separate them; two borderless tables side by side on one row grid still merge.
 - Section labels on a page that is almost all tables may come out as plain lines rather than headings.
 - OCR'd pages give headings and paragraphs, but tables on scanned pages come out as text lines.
-- Block `confidence.layout` is always null (no layout model is used). The base64 field name for `parsers: []` is `base64`; Firecrawl's docs don't name it.
+- Block `confidence.layout` is always null (no layout model is used).
+- `formats` other than `markdown` (e.g. `html`) are ignored with a warning; Firecrawl also builds `html` for PDFs.
+- If two `pdf` parsers are given, the first is used (as in Firecrawl); every one is still checked.
+- CLI errors print the Firecrawl code (`error: SCRAPE_PDF_OCR_REQUIRED: …`); with `--json` the error is
+  also printed as `{"success": false, "code": …, "error": …}`.
 - Right-to-left scripts, 3+ column layouts, and complex merged-cell tables are handled more simply than in pdf-inspector.
 
 ## Tests
