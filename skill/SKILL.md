@@ -6,8 +6,8 @@ description: Convert a PDF to Markdown, including tables, scanned pages, and cha
 # PDF to Markdown
 
 The script is `scripts/pdf2md.py` (built into this folder by `make_skill.py` in the pdf2md repo). It needs Python with `pdfplumber`, `pypdfium2` and `Pillow`;
-Tesseract (`pytesseract` + the `tesseract` program) is needed for scanned pages and
-for checking numbers on pictures.
+Tesseract (`pytesseract` + the `tesseract` program) is required: `prepare` stops with an
+install hint without it, because every number is checked against OCR text.
 
 ## Steps
 
@@ -57,5 +57,5 @@ for checking numbers on pictures.
 
 - `prepare --page-range 1-5,8` or `--max-pages N` for part of a large PDF.
 - `prepare --mode ocr` treats every page as a scan (for a PDF whose text layer is garbage).
-- `merge --page-markers` keeps `<!-- page N -->` between pages.
+- `merge --page-markers` puts `---` and `<!-- page N -->` between pages (none before the first).
 - Plain conversion without the image step: `python scripts/pdf2md.py <input.pdf> -o <output.md>`.

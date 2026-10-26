@@ -9,7 +9,8 @@ rebuilt on pdfplumber, plus image extraction and optional OCR.
 
 ```bash
 pip install -r requirements.txt
-# for OCR of scanned pages / images:  apt install tesseract-ocr   (or brew install tesseract)
+# Tesseract, for OCR of scanned pages / images; required for the vision step (prepare/merge):
+#   brew install tesseract   (macOS)   |   apt install tesseract-ocr   (Linux)
 ```
 
 ## Firecrawl-style options
@@ -19,19 +20,20 @@ Same names and behaviour as Firecrawl's PDF parser
 
 | Firecrawl option | CLI flag | Meaning |
 |---|---|---|
-| `parsers` (default `["pdf","image"]`) | `--parsers '<json>'` | `[]` returns the file as base64 instead of parsing |
+| `parsers` (default `["pdf","image"]`) | `--parsers '<json>'` | `[]` returns a PDF as base64 instead of parsing |
 | `mode: "fast"` | `--mode fast` | embedded text only; scanned pages are skipped, and a fully scanned PDF raises `SCRAPE_PDF_OCR_REQUIRED` (as Firecrawl does) |
 | `mode: "auto"` (default) | `--mode auto` | embedded text, OCR only for pages with no text layer |
 | `mode: "ocr"` | `--mode ocr` | OCR every page |
-| `maxPages` | `--max-pages N` | parse at most N pages (`numPages` vs `totalPages` in metadata) |
+| `maxPages` | `--max-pages N` | parse at most N pages, 1–10000 (`numPages` vs `totalPages` in metadata) |
 | `pages: true` | `--pages` | per-page markdown in `data.pages` |
 | `blocks: true` | `--blocks` | typed layout blocks in `data.blocks` (bbox, type, reading order, `markdownSpan`) |
-| `pageMarkers: true` | `--page-markers` | `<!-- page N -->` between pages |
+| `pageMarkers: true` | `--page-markers` | `---` and `<!-- page N -->` between pages (none before the first) |
 | `pageMarkdown` (deprecated) | — | old name for `pages`; an explicit `pages` wins |
-| `image` parser | (on by default) | OCR when the input is a PNG/JPG instead of a PDF; takes no options |
+| `image` parser | (on by default) | OCR when the input is a PNG/JPG instead of a PDF; takes no options. Off (`["pdf"]` or `[]`) → an image file raises `SCRAPE_UNSUPPORTED_FILE_ERROR`. A PDF of scanned images is still a PDF |
 
-As in Firecrawl, any parser other than `"pdf"` / `"image"` (e.g. `"images"`) is an error, and a file
-counts as a PDF when `%PDF` appears in its first 1 KB. Options of Firecrawl's hosted service (such as
+As in Firecrawl, any parser other than `"pdf"` / `"image"` (e.g. `"images"`) is an error, `pages` /
+`blocks` / `pageMarkers` must be `true` or `false`, a file counts as a PDF when `%PDF` appears in its
+first 1 KB, and anything that is neither a PDF nor an image raises `SCRAPE_UNSUPPORTED_FILE_ERROR`. Options of Firecrawl's hosted service (such as
 `refresh`, which skips its cache) are not accepted: this runs locally, with no API key and no cache.
 
 Extras not in Firecrawl: `images` (`save` / `embed` / `none`), `--page-range 1-5,8`,
@@ -93,7 +95,8 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 ## Charts and scanned pages (vision step)
 
 The `prepare` and `merge` commands of `pdf2md.py` add chart data and scanned-page structure using the agent's own vision
-model (e.g. GPT-4o inside a skill), so no API keys are needed:
+model (e.g. GPT-4o inside a skill), so no API keys are needed. It needs Tesseract: numbers on scans and
+pictures are checked against OCR text, and `prepare` stops if Tesseract is missing:
 
 ```bash
 python pdf2md.py prepare report.pdf work/   # draft.md, images, tasks.json (one prompt per image)
@@ -102,6 +105,8 @@ python pdf2md.py merge work/ -o report.md   # every number checked against page 
 ```
 
 Numbers not found in the page's own text are marked ⚠; values read off a drawing are written `~42`.
+OCR on JPEG scans sometimes misreads a digit (`17.5` as `1735`); the model's correct value is then
+flagged ⚠, never passed silently.
 Missing answers keep the plain pdf2md output.
 
 To install it as an agent skill, build the skill folder (SKILL.md + a copy of `pdf2md.py`):

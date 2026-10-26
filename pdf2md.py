@@ -1744,6 +1744,22 @@ class PDFOCRRequiredError(ValueError):
         self.pdf_type = pdf_type
 
 
+class UnsupportedFileError(ValueError):
+    """Same as Firecrawl's SCRAPE_UNSUPPORTED_FILE_ERROR: not a PDF, and not an
+    image the image parser may OCR."""
+    code = "SCRAPE_UNSUPPORTED_FILE_ERROR"
+
+    def __init__(self, reason):
+        super().__init__(
+            f"The file type cannot be processed: {reason}. Supported are PDFs and raster "
+            f'images (PNG, JPEG, TIFF, GIF, BMP, WebP), which are OCR\'d when the parsers '
+            f'option includes "image" (the default).')
+        self.reason = reason
+
+
+PAGE_MARKER = "---\n\n<!-- page {n} -->"   # Firecrawl's pageMarkers join, between pages
+
+
 def load_source(src):
     """path | URL | bytes -> (bytes, display name, is_url)."""
     if isinstance(src, (bytes, bytearray)):
@@ -1966,6 +1982,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
             pos += len(fragment)
             return [start, pos]
 
+        first_page = min(pages_lines, default=None)
         for pageno in sorted(pages_lines):
             items = pages_lines[pageno]
             regs = page_regions.get(pageno, [])
@@ -1987,8 +2004,8 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 seq = sorted(items, key=lambda l: (l.top, l.x0))
             blks = render_blocks(seq, base, tiers, col_width, image_md)
 
-            if page_markers:
-                emit(f"<!-- page {pageno} -->", "\n\n")
+            if page_markers and pageno != first_page:    # Firecrawl: between pages only
+                emit(PAGE_MARKER.format(n=pageno), "\n\n")
                 prev_list = False
 
             w, h = widths[pageno], heights[pageno]
@@ -2124,8 +2141,15 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
                                    "pageMarkers", "images"}
         if unknown:
             raise ValueError(f"unknown pdf parser options: {sorted(unknown)}")
+        for opt in ("pages", "blocks", "pageMarkers"):         # Firecrawl: z.boolean()
+            if opt in pdf_opts and not isinstance(pdf_opts[opt], bool):
+                raise ValueError(f"{opt} must be true or false")
+        mp = pdf_opts.get("maxPages", 1)                      # Firecrawl: int 1..10000
+        if "maxPages" in pdf_opts and (isinstance(mp, bool) or not isinstance(mp, int)
+                                       or not 1 <= mp <= 10000):
+            raise ValueError("maxPages must be an integer from 1 to 10000")
         r = convert(data, mode=pdf_opts.get("mode", "auto"), max_pages=pdf_opts.get("maxPages"),
-                    page_range=page_range, page_markers=bool(pdf_opts.get("pageMarkers")),
+                    page_range=page_range, page_markers=pdf_opts.get("pageMarkers", False),
                     images=pdf_opts.get("images", images), image_dir=image_dir,
                     link_base=link_base, ocr_lang=ocr_lang, image_dpi=image_dpi,
                     password=password, name=name)
@@ -2142,14 +2166,14 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
         if pdf_opts.get("blocks"):
             out["blocks"] = r.blocks
     else:
-        if not image_on:
-            return raw()
         from PIL import Image
         try:
             img = Image.open(io.BytesIO(data))
             img.load()
         except Exception:
-            raise ValueError("input is neither a PDF nor a readable image")
+            raise UnsupportedFileError("not a PDF or a readable image")
+        if not image_on:
+            raise UnsupportedFileError('an image, and the parsers option leaves out "image"')
         paras = ocr_image(flatten_alpha(img), ocr_lang) if ocr_available() else None
         if paras is None:
             warnings.append("image needs OCR but Tesseract is not available; "
@@ -2271,6 +2295,10 @@ def _ocr_text(img) -> str:
 
 
 def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=None):
+    if not ocr_available():                 # numbers on scans/pictures are checked against OCR
+        raise RuntimeError("Tesseract is required for the vision step: install it "
+                           "(macOS: brew install tesseract; Linux: apt install tesseract-ocr) "
+                           "and pip install pytesseract")
     os.makedirs(os.path.join(work, "answers"), exist_ok=True)
     img_dir = os.path.join(work, "images")
     r = convert(src, mode=mode, page_range=page_range, max_pages=max_pages,
@@ -2330,19 +2358,22 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
 
 # ---- merge ----
 
-PAGE_SPLIT = re.compile(r"<!-- page (\d+) -->\n?")
+PAGE_SPLIT = re.compile(r"(?:^|\n\n)---\n\n<!-- page (\d+) -->\n?")
 
 
-def _split_pages(md: str) -> dict:
+def _split_pages(md: str, first_page: int) -> dict:
+    """draft.md -> {page: markdown}; the first page carries no marker."""
     parts = PAGE_SPLIT.split(md)
-    return {int(parts[i]): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)}
+    pages = {first_page: parts[0].strip()}
+    pages.update({int(parts[i]): parts[i + 1].strip() for i in range(1, len(parts) - 1, 2)})
+    return pages
 
 
 def merge(work, page_markers=False):
     with open(os.path.join(work, "tasks.json"), encoding="utf-8") as f:
         manifest = json.load(f)
     with open(os.path.join(work, "draft.md"), encoding="utf-8") as f:
-        pages = _split_pages(f.read())
+        pages = _split_pages(f.read(), manifest["pages"][0] if manifest["pages"] else 1)
     report = []
     for t in manifest["tasks"]:
         ans_path = os.path.join(work, "answers", t["id"] + ".md")
@@ -2379,10 +2410,10 @@ def merge(work, page_markers=False):
         report.append(entry)
 
     out = []
-    for pn in manifest["pages"]:
+    for k, pn in enumerate(manifest["pages"]):
         body = pages.get(pn, "")
-        if page_markers:
-            out.append(f"<!-- page {pn} -->")
+        if page_markers and k:
+            out.append(PAGE_MARKER.format(n=pn))
         if body:
             out.append(body)
     md = "\n\n".join(out) + "\n"
@@ -2422,12 +2453,13 @@ def vision_main(argv):
     m.add_argument("--page-markers", action="store_true")
     a = ap.parse_args(argv)
     if a.cmd == "prepare":
-        man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password)
+        try:
+            man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password)
+        except RuntimeError as e:
+            sys.exit(f"error: {e}")
         print(f"{len(man['tasks'])} image task(s) in {os.path.join(a.work, 'tasks.json')}")
         for t in man["tasks"]:
             print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}")
-        if not man["ocr_available"]:
-            print("warning: Tesseract not available; numbers on scans/pictures can't be checked")
         return
     md, report = merge(a.work, a.page_markers)
     if a.output:
@@ -2455,7 +2487,8 @@ def main(argv=None):
                     help="include per-page markdown (JSON output)")
     ap.add_argument("--blocks", action="store_true",
                     help="include typed layout blocks (JSON output)")
-    ap.add_argument("--page-markers", action="store_true", help="insert <!-- page N --> markers")
+    ap.add_argument("--page-markers", action="store_true",
+                    help="insert ---/<!-- page N --> between pages (Firecrawl's pageMarkers)")
     ap.add_argument("--json", action="store_true",
                     help="print the Firecrawl-style JSON response instead of markdown")
     ap.add_argument("--parsers", help='raw Firecrawl parsers JSON, e.g. '

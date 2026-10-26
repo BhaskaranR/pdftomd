@@ -30,7 +30,9 @@ Heuristics are ported from Firecrawl's MIT-licensed `pdf-inspector` Rust crate
 
 ## Firecrawl contract (keep it exact)
 `scrape(url, formats, parsers)`: parsers default `["pdf","image"]`, `[]` → base64. PDF options `mode` fast|auto|ocr,
-`maxPages`, `pages`, `blocks`, `pageMarkers`. `fast` on a Scanned/ImageBased PDF raises `SCRAPE_PDF_OCR_REQUIRED`.
+`maxPages` (1–10000), `pages`, `blocks`, `pageMarkers` (booleans only; markers = `---` + `<!-- page N -->` between
+pages, none before the first). `fast` on a Scanned/ImageBased PDF raises `SCRAPE_PDF_OCR_REQUIRED`; non-PDF that
+isn't an image, or an image with the image parser off, raises `SCRAPE_UNSUPPORTED_FILE_ERROR`. Vision step needs Tesseract.
 Response shape and block fields are documented in README.md.
 
 ## Rules when changing code

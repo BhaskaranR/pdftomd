@@ -121,6 +121,18 @@ def test_parsers(pdf, png):
     r = scrape(pdf, parsers=["image"])
     check("parsers=['image'] + PDF: pdf parser off -> base64", "base64" in r["data"], list(r["data"]))
 
+    # image parser off, or not a PDF/image: Firecrawl's SCRAPE_UNSUPPORTED_FILE_ERROR
+    unsupported = getattr(pdf2md, "UnsupportedFileError", None)
+    check("UnsupportedFileError exists", unsupported is not None)
+    html = b"<!DOCTYPE html><html><body>Not Found</body></html>"
+    for name, src, parsers in (("PNG + ['pdf']", png, ["pdf"]), ("PNG + []", png, []),
+                               ("HTML, default parsers", html, None), ("HTML + []", html, []),
+                               ("garbage bytes", b"\x00\x01junk", None)):
+        e = raises(scrape, src, parsers=parsers)
+        check(f"{name}: SCRAPE_UNSUPPORTED_FILE_ERROR",
+              unsupported is not None and isinstance(e, unsupported)
+              and getattr(e, "code", None) == "SCRAPE_UNSUPPORTED_FILE_ERROR", repr(e))
+
     a = scrape(pdf, parsers=["pdf"])["data"]["markdown"]
     b = scrape(pdf, parsers=[{"type": "pdf"}])["data"]["markdown"]
     c = scrape(pdf, parsers=[{"type": "image"}, {"type": "pdf", "mode": "auto"}])["data"]["markdown"]
@@ -141,7 +153,8 @@ def test_pdf_options(pdf):
 
     m = scrape(pdf, parsers=[{"type": "pdf", "maxPages": 2}])["data"]["metadata"]
     check("maxPages=2: numPages 2, totalPages 3", (m.get("numPages"), m.get("totalPages")) == (2, 3), m)
-    for bad in (0, -1, "2", True, 2.5):
+    check("maxPages=10000 accepted", raises(scrape, pdf, parsers=[{"type": "pdf", "maxPages": 10000}]) is None)
+    for bad in (0, -1, "2", True, 2.5, 10001, None):
         e = raises(scrape, pdf, parsers=[{"type": "pdf", "maxPages": bad}])
         check(f"maxPages={bad!r} rejected", isinstance(e, ValueError), repr(e))
 
@@ -168,6 +181,32 @@ def test_pdf_options(pdf):
     check("pageMarkers: markers for pages 2 and 3, in order",
           0 < p2 < p3 and md.index("Alpha") < p2 < md.index("Bravo") < p3 < md.index("Charlie"), md)
     check("pageMarkers off: no markers", "<!-- page" not in base)
+    # Firecrawl: "\n\n---\n\n<!-- page N -->\n\n" between pages only, none before the first
+    check("pageMarkers: none before the first page", "<!-- page 1 -->" not in md and not md.startswith("<!--"), md[:80])
+    check("pageMarkers: Firecrawl separator before pages 2 and 3",
+          "\n\n---\n\n<!-- page 2 -->\n\n" in md and "\n\n---\n\n<!-- page 3 -->\n\n" in md, md)
+    d = scrape(pdf, parsers=[{"type": "pdf", "pageMarkers": True, "pages": True, "blocks": True}])["data"]
+    check("pageMarkers: per-page markdown carries no markers", not any("<!--" in p["markdown"] for p in d["pages"]))
+    md, spans_ok = d["markdown"], True
+    for pg in d["blocks"]:
+        for it in pg["items"]:
+            sp = it.get("markdownSpan")
+            if sp:
+                spans_ok &= md[sp[0]:sp[1]] == it["content"]
+    check("pageMarkers: markdownSpan still exact", spans_ok)
+    md = pdf2md.scrape(pdf, images="none", page_range="2-3",
+                       parsers=[{"type": "pdf", "pageMarkers": True}])["data"]["markdown"]
+    check("pageMarkers + page range 2-3: no marker before page 2, one before 3",
+          "<!-- page 2 -->" not in md and "\n\n---\n\n<!-- page 3 -->\n\n" in md, md)
+    one = make_pdf("one.pdf", [text_body])
+    md = scrape(one, parsers=[{"type": "pdf", "pageMarkers": True}])["data"]["markdown"]
+    check("pageMarkers on a one-page PDF: no marker", "<!--" not in md and "---" not in md, md[:120])
+
+    for opt in ("pages", "blocks", "pageMarkers"):
+        for bad in ("yes", 1, None):
+            e = raises(scrape, pdf, parsers=[{"type": "pdf", opt: bad}])
+            check(f"{opt}={bad!r} rejected, named", isinstance(e, ValueError) and opt in str(e), repr(e))
+        check(f"{opt}=False accepted", raises(scrape, pdf, parsers=[{"type": "pdf", opt: False}]) is None)
 
     # deprecated alias, folded into pages; explicit pages wins
     d = scrape(pdf, parsers=[{"type": "pdf", "pageMarkdown": True}])["data"]
