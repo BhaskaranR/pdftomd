@@ -289,6 +289,78 @@ def test_blank_page():
         check("text/blank/scan: page 1 kept", "Page one text" in md, md[:200])
 
 
+def hard_pages_pdf(path):
+    """page 1: one column with a ruled table; page 2: two text columns; page 3: plain prose."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import (BaseDocTemplate, Frame, NextPageTemplate, PageBreak, PageTemplate,
+                                    Paragraph, Table, TableStyle)
+    ss = getSampleStyleSheet()
+    W, H = letter
+    doc = BaseDocTemplate(path, pagesize=letter)
+    one = Frame(72, 72, W - 144, H - 144, id="one")
+    left = Frame(72, 72, (W - 144) / 2 - 12, H - 144, id="l")
+    right = Frame(72 + (W - 144) / 2 + 12, 72, (W - 144) / 2 - 12, H - 144, id="r")
+    doc.addPageTemplates([PageTemplate("one", [one]), PageTemplate("two", [left, right]),
+                          PageTemplate("one2", [one])])
+    body = ("Desk volumes moved with the market over the quarter while costs held flat "
+            "against the plan approved by the committee in the spring review. ")
+    rows = [["Desk", "Q1", "Q2"], ["Rates", "1,250", "(300)"], ["Credit", "980", "1,410"],
+            ["Equities", "2,045", "1,990"]]
+    t = Table(rows)
+    t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.black)]))
+    story = [Paragraph("Quarterly Desk Summary", ss["Heading1"]), Paragraph(body, ss["BodyText"]), t,
+             NextPageTemplate("two"), PageBreak()]
+    story += [Paragraph(f"Column paragraph {i + 1}. " + body * 3, ss["BodyText"]) for i in range(8)]
+    story += [NextPageTemplate("one2"), PageBreak(), Paragraph("Closing note. " + body * 2, ss["BodyText"])]
+    doc.build(story)
+    return path
+
+
+def test_hard_pages_prepare():
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = hard_pages_pdf(os.path.join(tmp, "hard.pdf"))
+        man = pv.prepare(pdf, os.path.join(tmp, "off"))
+        check("hard pages off by default: no tables/layout tasks",
+              not [t for t in man["tasks"] if t["kind"] in ("tables", "layout")], man["tasks"])
+        work = os.path.join(tmp, "w")
+        man = pv.prepare(pdf, work, hard_pages=True)
+        kinds = {t["page"]: t["kind"] for t in man["tasks"]}
+        check("hard pages: page 1 (one column + table) -> tables task", kinds.get(1) == "tables", man["tasks"])
+        check("hard pages: page 2 (two columns) -> layout task", kinds.get(2) == "layout", man["tasks"])
+        check("hard pages: page 3 (plain prose) -> no task", 3 not in kinds, man["tasks"])
+        t1 = next(t for t in man["tasks"] if t["page"] == 1)
+        check("tables task: counts the page's tables", t1.get("tables") == 1, t1)
+        check("tables task: page image saved", os.path.exists(os.path.join(work, t1["image"])), t1["image"])
+        check("tables task: prompt asks for the tables only, with our draft as context",
+              "only the tables" in t1["prompt"] and "Rates" in t1["prompt"], t1["prompt"][:300])
+        check("tables task: checked against the native text", "(300)" in t1["check_text"] and "1,410" in t1["check_text"],
+              t1["check_text"][:300])
+        t2 = next(t for t in man["tasks"] if t["page"] == 2)
+        check("layout task: whole page in reading order", "reading order" in t2["prompt"], t2["prompt"][:200])
+        man = pv.prepare(pdf, os.path.join(tmp, "cap"), hard_pages=True, max_hard_pages=1)
+        check("max_hard_pages=1: one hard task, the first", [t["page"] for t in man["tasks"]
+                                                             if t["kind"] in ("tables", "layout")] == [1], man["tasks"])
+        md, rep = pv.merge(work)
+        check("hard-page task without an answer: rule-based output kept",
+              "| Rates | 1,250 | (300) |" in md.replace("  ", " ") or "Rates" in md, md[:300])
+        check("hard-page tasks reported", {e["id"] for e in rep} >= {"p1_tables", "p2_layout"}, rep)
+
+        scan = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
+        man = pv.prepare(scan, os.path.join(tmp, "ws"), hard_pages=True)
+        check("scanned page: only its page task, not a hard-page task too",
+              [t["kind"] for t in man["tasks"]] == ["page"], man["tasks"])
+
+        out = os.path.join(tmp, "wcli")
+        import subprocess
+        r = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "pdf2md.py"), "prepare", pdf, out,
+                            "--hard-pages", "--max-hard-pages", "5"], capture_output=True, text=True)
+        check("cli prepare --hard-pages lists them with a reason",
+              r.returncode == 0 and "p1_tables: tables, page 1" in r.stdout and "1 table" in r.stdout
+              and "p2_layout: layout, page 2" in r.stdout, r.stdout + r.stderr[-300:])
+
+
 def test_missing_answer():
     with tempfile.TemporaryDirectory() as tmp:
         pdf = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
@@ -326,6 +398,7 @@ if __name__ == "__main__":
         test_jpeg_scan_safety_net()
         test_page_markers()
         test_blank_page()
+        test_hard_pages_prepare()
         test_missing_answer()
         test_cli()
     else:

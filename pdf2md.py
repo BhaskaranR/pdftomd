@@ -158,6 +158,8 @@ class Result:
     processing_time_ms: float
     images: list = field(default_factory=list)
     is_complex: bool = False
+    pages_with_tables: list = field(default_factory=list)    # pdf-inspector's names
+    pages_with_columns: list = field(default_factory=list)   # (columns or side-by-side blocks)
     num_pages: int = 0
     pages: list = field(default_factory=list)
     blocks: list = field(default_factory=list)
@@ -1978,6 +1980,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
         doc = []          # fragments of the document markdown
         pos = 0
         pages_out, blocks_out = [], []
+        table_pages, column_pages = [], []
         title_set = False
         title_text = None
         prev_list = False
@@ -2004,9 +2007,12 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                     else:
                         seq.extend(sorted(sub, key=lambda l: (l.top, l.x0)))
                 complex_layout = True
+                column_pages.append(pageno)
             elif any(l.kind == "text" for l in items):
                 seq, multi = reading_order(items, widths[pageno])
                 complex_layout |= multi
+                if multi:
+                    column_pages.append(pageno)
             elif any(l.kind == "ocr" for l in items):
                 seq = items          # OCR page: Tesseract order, figures already slotted in
             else:
@@ -2060,6 +2066,8 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 it["id"] = f"p{pageno}.b{k}"
                 it["readingOrder"] = k
             page_items = [{"id": it.pop("id"), **it} for it in page_items]
+            if any(it["type"] == "table" for it in page_items):
+                table_pages.append(pageno)
             pages_out.append({"pageNumber": pageno, "markdown": "".join(page_md)})
             status = ("skipped" if pageno in skipped else
                       "ocr_unavailable" if pageno in ocr_missing and not page_md else "ok")
@@ -2076,6 +2084,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
     r = Result(md, pdf_type, n, confidence, needs_ocr, title,
                round((time.time() - t0) * 1000, 1), all_images, complex_layout)
     r.num_pages = len(idx)
+    r.pages_with_tables, r.pages_with_columns = table_pages, column_pages
     r.pages = pages_out
     r.blocks = blocks_out
     r.source_name = name
@@ -2283,6 +2292,30 @@ then a Markdown table. Copy printed numbers exactly; a value read from a bar len
 or an axis gets a leading ~ (for example ~42); leave a cell empty if you cannot read it.
 If it is not a chart or a table (a logo, a photo, a signature), output only: NONE"""
 
+TABLES_PROMPT = """This image is page {page} of a PDF. It has {count} table(s).
+Our text extraction of the page, for the exact spelling of words and numbers:
+---
+{context}
+---
+Write only the tables, in the order they appear on the page, each as one Markdown table
+(a header row, then one row per row on the page). Put a blank line between tables.
+Copy every word and number exactly as printed, including minus signs and brackets around
+negative numbers. Keep every row and column; leave a cell empty only if it is empty on
+the page. Do not add totals, notes, or anything that is not in the table.
+Output only the tables."""
+
+LAYOUT_PROMPT = """This image is page {page} of a PDF laid out in columns or side-by-side blocks.
+Our text extraction of the page, for the exact spelling of words and numbers:
+---
+{context}
+---
+Write the whole page as Markdown in reading order: each column top to bottom before the
+next one, each side-by-side block on its own. Headings as #, ##, ###; paragraphs as text;
+lists as - or 1.; tables as Markdown tables, one row per row on the page.
+Copy every word and number exactly as printed, including minus signs and brackets.
+Do not summarize, reword, skip, or add anything that is not on the page.
+Output only the Markdown."""
+
 PAGE_PROMPT = """This image is page {page} of a scanned PDF.
 Transcribe the whole page as Markdown, top to bottom:
 - headings as #, ##, ###; paragraphs as text; lists as - or 1.
@@ -2424,7 +2457,8 @@ def _ocr_text(img) -> str:
     return "\n".join(p["text"] for p in paras)
 
 
-def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=None):
+def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=None,
+            hard_pages=False, max_hard_pages=None):
     if not ocr_available():                 # numbers on scans/pictures are checked against OCR
         raise RuntimeError("Tesseract is required for the vision step: install it "
                            "(macOS: brew install tesseract; Linux: apt install tesseract-ocr) "
@@ -2479,6 +2513,30 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
                           "check_text": page_md.get(pageno, "")})
             page.close()
 
+        # hard text pages: tables (tables only) or columns (whole page), checked against the text layer
+        if hard_pages:
+            scanned = {t["page"] for t in tasks if t["kind"] == "page"}
+            hard = [p for p in sorted(page_md) if p not in scanned
+                    and (p in r.pages_with_columns or p in r.pages_with_tables)]
+            for pageno in hard[:max_hard_pages]:
+                page = pdf.pages[pageno - 1]
+                os.makedirs(os.path.join(work, "hard"), exist_ok=True)
+                page.to_image(resolution=SCAN_DPI).original.save(
+                    os.path.join(work, "hard", f"page_{pageno}.png"))
+                native = page.extract_text() or ""
+                context = page_md.get(pageno, "")[:CONTEXT_CHARS]
+                if pageno in r.pages_with_columns:
+                    task = {"id": f"p{pageno}_layout", "kind": "layout", "reason": "columns",
+                            "prompt": LAYOUT_PROMPT.format(page=pageno, context=context)}
+                else:
+                    n = len(TABLE_BLOCK_RE.findall(page_md.get(pageno, "")))
+                    task = {"id": f"p{pageno}_tables", "kind": "tables", "tables": n,
+                            "reason": f"{n} table{'s' * (n != 1)}",
+                            "prompt": TABLES_PROMPT.format(page=pageno, count=n, context=context)}
+                task.update(page=pageno, image=f"hard/page_{pageno}.png", check_text=native)
+                tasks.append(task)
+                page.close()
+
     manifest = {"source": r.source_name, "pdf_type": r.pdf_type, "ocr_available": have_ocr,
                 "pages": sorted(page_md), "tasks": tasks}
     with open(os.path.join(work, "tasks.json"), "w", encoding="utf-8") as f:
@@ -2487,6 +2545,8 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
 
 
 # ---- merge ----
+
+TABLE_BLOCK_RE = re.compile(r"(?:^\|.*\|[ \t]*(?:\n|$))+", re.M)
 
 PAGE_SPLIT = re.compile(r"<!-- page (\d+) -->\n?")
 
@@ -2508,6 +2568,10 @@ def merge(work, page_markers=False):
         entry = {"id": t["id"], "kind": t["kind"], "page": t["page"], "image": t["image"]}
         if not os.path.exists(ans_path):
             entry["status"] = "no answer: original output kept"
+            report.append(entry)
+            continue
+        if t["kind"] in ("tables", "layout"):
+            entry["status"] = "kept rule-based output (hard-page answers are not merged yet)"
             report.append(entry)
             continue
         with open(ans_path, encoding="utf-8") as f:
@@ -2576,6 +2640,9 @@ def vision_main(argv):
     p.add_argument("--page-range")
     p.add_argument("--max-pages", type=int)
     p.add_argument("--password")
+    p.add_argument("--hard-pages", action="store_true",
+                   help="also send text pages with tables (tables only) or columns (whole page)")
+    p.add_argument("--max-hard-pages", type=int, help="at most N hard pages, in page order")
     m = sub.add_parser("merge", help="check the model's answers and write the final markdown")
     m.add_argument("work")
     m.add_argument("-o", "--output", help="markdown file (default: print)")
@@ -2583,7 +2650,8 @@ def vision_main(argv):
     a = ap.parse_args(argv)
     try:
         if a.cmd == "prepare":
-            man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password)
+            man = prepare(a.pdf, a.work, a.mode, a.page_range, a.max_pages, a.password,
+                          a.hard_pages, a.max_hard_pages)
         else:
             md, report = merge(a.work, a.page_markers)
     except Exception as e:  # noqa: BLE001 -- one clean line, as for plain conversion
@@ -2591,7 +2659,8 @@ def vision_main(argv):
     if a.cmd == "prepare":
         print(f"{len(man['tasks'])} image task(s) in {os.path.join(a.work, 'tasks.json')}")
         for t in man["tasks"]:
-            print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}")
+            why = f"   ({t['reason']})" if t.get("reason") else ""
+            print(f"  {t['id']}: {t['kind']}, page {t['page']}, image {t['image']}{why}")
         return
     if a.output:
         with open(a.output, "w", encoding="utf-8") as f:
