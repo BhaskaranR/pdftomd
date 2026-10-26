@@ -68,6 +68,7 @@ install hint without it, because every number is checked against OCR text.
   to cap how many), for when the plain conversion gets those pages wrong.
 - `merge --page-markers` puts `---` and `<!-- page N -->` between pages (none before the first).
 - Plain conversion without the image step: `python scripts/pdf2md.py <input.pdf> -o <output.md>`.
+- Pieces for search/embeddings: add `--chunks` (JSON output with `data.chunks`; `--chunk-size N`, default 2000).
 
 ## Spreadsheets (xlsx, xlsm, csv)
 

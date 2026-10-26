@@ -36,7 +36,7 @@ c3d57613 SCAN_MAX_NATIVE_CHARS      35a99978 is_pdf_buffer
 bfb84b3d SCAN_MAX_MARKS             16384e3e PDF_OPTIONS
 d634174a INK_DPI                    f3d66931 _pdf_options
 c23a360a image_marks                52941aa0 _parser_opts
-ff9f20eb page_stats                 15679fd5 scrape
+ff9f20eb page_stats                 61d929a7 scrape
 e1abee19 classify                   f02a1535 VISION_DOC
 b26df565 page_origin                12634071 MIN_PICTURE_PT
 b49fbfed extract_words              52ffc8dd SCAN_DPI
@@ -77,5 +77,5 @@ b504d738 ocr_available              5782f04a merge
 aa26e7d7 flatten_alpha              b7686859 summary
 2a5fda60 ocr_image                  b5ee0cf8 vision_main
 e7e65bb9 segment_regions            edacb556 error_text
-d6bec067 rule_spans_columns         ff6b540b main
+d6bec067 rule_spans_columns         cf2b1cea main
 25954202 region_of

@@ -2259,7 +2259,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
            link_base: Optional[str] = None, ocr_lang: str = "eng",
            page_range: Optional[str] = None, image_dpi: int = 150,
            include_hidden: bool = False, filename: Optional[str] = None,
-           charts: bool = False) -> dict:
+           charts: bool = False, chunk=None) -> dict:
     """Firecrawl /scrape-compatible call for PDFs, images and spreadsheets.
     parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file base64'd
     in `markdown`. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
@@ -2271,9 +2271,18 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     then Content-Type, then the bytes — and converted by sheet2md; PDF options don't apply.
     include_hidden keeps hidden sheets/rows/columns; charts adds each chart's saved numbers
     as a table (not in Firecrawl); filename names a bytes source.
+    chunk: True or {"maxChars": N} adds `data.chunks`, the document cut into pieces for
+    embeddings by chunk2md.py (not in Firecrawl).
     """
     if images is None:
         images = "save" if image_dir else "embed"
+    chunk_size = None
+    if chunk:
+        import chunk2md
+        opts = {} if chunk is True else chunk
+        if not isinstance(opts, dict) or set(opts) - {"maxChars"}:
+            raise ValueError('chunk must be true or {"maxChars": N}')
+        chunk_size = chunk2md.check_size(opts.get("maxChars", chunk2md.CHUNK_MAX_CHARS))
     data, name, is_url, ctype = _fetch(url)
     if filename:
         name = filename
@@ -2304,6 +2313,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
         out = {"metadata": meta}
         if "markdown" in formats:
             out["markdown"] = r.markdown
+        chunk_src = r
     elif is_pdf:
         if pdf_opts is None:
             return raw()
@@ -2324,6 +2334,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
             out["pages"] = r.pages
         if pdf_opts.get("blocks"):
             out["blocks"] = r.blocks
+        chunk_src = r
     else:
         from PIL import Image
         try:
@@ -2339,8 +2350,12 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
                             "install tesseract-ocr and pytesseract")
             paras = []
         out = {"metadata": meta}
+        image_md = "\n\n".join(p["text"] for p in paras) + ("\n" if paras else "")
         if "markdown" in formats:
-            out["markdown"] = "\n\n".join(p["text"] for p in paras) + ("\n" if paras else "")
+            out["markdown"] = image_md
+        chunk_src = image_md
+    if chunk_size is not None:
+        out["chunks"] = chunk2md.chunk_markdown(chunk_src, chunk_size)
     if warnings:
         out["warning"] = "; ".join(warnings)
     return {"success": True, "data": out}
@@ -2921,10 +2936,15 @@ def main(argv=None):
                     help="spreadsheets: keep hidden sheets, rows and columns")
     ap.add_argument("--charts", action="store_true",
                     help="spreadsheets: add each chart's saved numbers as a table (not in Firecrawl)")
+    ap.add_argument("--chunks", action="store_true",
+                    help="add the document cut into pieces for embeddings (JSON output; not in Firecrawl)")
+    ap.add_argument("--chunk-size", type=int, metavar="N",
+                    help="largest chunk in characters (default 2000); implies --chunks")
     ap.add_argument("--info", action="store_true", help="print detection info to stderr")
     a = ap.parse_args(argv)
 
-    want_json = a.json or a.pages or a.blocks or bool(a.parsers)
+    want_chunks = a.chunks or a.chunk_size is not None
+    want_json = a.json or a.pages or a.blocks or bool(a.parsers) or want_chunks
     out_dir = os.path.dirname(os.path.abspath(a.output)) if a.output else os.getcwd()
     image_dir = a.image_dir
     if a.images == "save" and not image_dir:
@@ -2947,7 +2967,8 @@ def main(argv=None):
         resp = scrape(a.input, parsers=parsers, password=a.password, images=a.images,
                       image_dir=image_dir, link_base=out_dir, ocr_lang=a.ocr_lang,
                       page_range=a.page_range, image_dpi=a.image_dpi,
-                      include_hidden=a.include_hidden, charts=a.charts)
+                      include_hidden=a.include_hidden, charts=a.charts,
+                      chunk=({"maxChars": a.chunk_size} if a.chunk_size is not None else want_chunks) or None)
     except Exception as e:  # noqa: BLE001 -- pdfminer wraps password / corruption errors
         text = error_text(e, a.password)
         if want_json:                                     # Firecrawl-style error body
