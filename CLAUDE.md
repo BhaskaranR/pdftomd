@@ -9,7 +9,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 ## Layout
 - `pdf2md.py` — everything: extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
-  scanned pages; number check against page text/OCR). Keep it one file. `skill/SKILL.md` = the skill's instructions; `python make_skill.py` builds the
+  scanned pages; number check against page text/OCR; opt-in `--hard-pages`: text pages with tables/columns, used only
+  if numbers and words match the text layer, else rule-based output kept). Keep it one file. `skill/SKILL.md` = the skill's instructions; `python make_skill.py` builds the
   installable folder in `dist/pdf-to-markdown/` (SKILL.md + scripts/pdf2md.py copy). Never commit a copy of pdf2md.py.
   Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
 - `sheet2md.py` — spreadsheets: zip+XML reader (stdlib only), number formats, header-row guess, GFM tables, CSV,

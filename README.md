@@ -150,6 +150,23 @@ OCR on JPEG scans sometimes misreads a digit (`17.5` as `1735`); the model's cor
 flagged ⚠, never passed silently.
 Missing answers keep the plain pdf2md output.
 
+### Hard text pages (opt-in)
+
+`prepare --hard-pages [--max-hard-pages N]` also sends text pages our rules may get wrong, one page at a
+time: a page with tables gets a `tables` task (the model returns only the tables), a page with columns or
+side-by-side blocks gets a `layout` task (the whole page in reading order). These pages have a text layer,
+so `merge` uses an answer only if it matches it: every number by value, sign and row, no `~` estimates, the
+same number of tables, and, for whole pages, the same words (none added, almost none left out, word order
+found on the page). Otherwise the rule-based output stays and the report says why:
+
+```
+p1_tables: merged 1 table
+p2_layout: kept rule-based output: words not on the page: and, stayed, as, planned; ...
+```
+
+Firecrawl routes a whole document to its hosted parser when any page has a table or columns; this does it
+per page, with the agent's model, and checks the result against the text layer.
+
 To install it as an agent skill, build the skill folder (SKILL.md + copies of `pdf2md.py` and `sheet2md.py`):
 
 ```bash

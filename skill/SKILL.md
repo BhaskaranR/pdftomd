@@ -34,6 +34,9 @@ install hint without it, because every number is checked against OCR text.
      Never fill a gap with a plausible number.
    - Do not summarize or leave out text on a scanned page.
    - For a picture that is not a chart or a table, the reply is just `NONE`.
+   - `tables` and `layout` tasks are pages with a real text layer: copy every word and
+     number exactly, never use `~`, never reword. An answer that differs from the page's
+     text is not used.
    - Do not edit `draft.md` or `tasks.json` yourself.
 
 3. Merge. Run:
@@ -50,7 +53,7 @@ install hint without it, because every number is checked against OCR text.
 4. Report to the user:
    - where the Markdown file is;
    - every line from step 3 that says `NOT FOUND`, `SIGN DIFFERS`, `IN ANOTHER ROW`,
-     `ROW NOT CONFIRMED`, `no answer`, or `unchecked`, because those numbers need a person
+     `ROW NOT CONFIRMED`, `kept rule-based output`, `no answer`, or `unchecked`, because those numbers need a person
      to check them against the image;
    - how many values are estimates (`~`).
    Do not say the numbers are verified when the merge output says otherwise. A clean merge
@@ -61,6 +64,8 @@ install hint without it, because every number is checked against OCR text.
 
 - `prepare --page-range 1-5,8` or `--max-pages N` for part of a large PDF.
 - `prepare --mode ocr` treats every page as a scan (for a PDF whose text layer is garbage).
+- `prepare --hard-pages` also sends text pages with tables or columns (`--max-hard-pages N`
+  to cap how many), for when the plain conversion gets those pages wrong.
 - `merge --page-markers` puts `---` and `<!-- page N -->` between pages (none before the first).
 - Plain conversion without the image step: `python scripts/pdf2md.py <input.pdf> -o <output.md>`.
 
