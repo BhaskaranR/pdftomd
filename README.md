@@ -27,7 +27,12 @@ Same names and behaviour as Firecrawl's PDF parser
 | `pages: true` | `--pages` | per-page markdown in `data.pages` |
 | `blocks: true` | `--blocks` | typed layout blocks in `data.blocks` (bbox, type, reading order, `markdownSpan`) |
 | `pageMarkers: true` | `--page-markers` | `<!-- page N -->` between pages |
-| `image` parser | (on by default) | OCR when the input is a PNG/JPG instead of a PDF |
+| `pageMarkdown` (deprecated) | — | old name for `pages`; an explicit `pages` wins |
+| `image` parser | (on by default) | OCR when the input is a PNG/JPG instead of a PDF; takes no options |
+
+As in Firecrawl, any parser other than `"pdf"` / `"image"` (e.g. `"images"`) is an error, and a file
+counts as a PDF when `%PDF` appears in its first 1 KB. Options of Firecrawl's hosted service (such as
+`refresh`, which skips its cache) are not accepted: this runs locally, with no API key and no cache.
 
 Extras not in Firecrawl: `images` (`save` / `embed` / `none`), `--page-range 1-5,8`,
 `--ocr-lang eng+hin`, `--password`.
@@ -117,6 +122,7 @@ Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped wit
 python tests/make_samples.py tests/samples   # builds report.pdf + scanned.pdf
 python pdf2md.py tests/samples/report.pdf -o tests/out/report.md
 python tests/test_layout.py                  # side-by-side tables, charts, and must-not-change cases
+python tests/test_contract.py                # Firecrawl options and PDF detection
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
 

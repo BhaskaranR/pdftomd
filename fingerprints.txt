@@ -99,8 +99,9 @@ eccff5ef union_box
 569feb68 PDFOCRRequiredError
 2744c51f load_source
 e689462a convert
-1cdf5005 _parser_opts
-b08b5908 scrape
+35a99978 is_pdf_buffer
+0e4d6a1c _parser_opts
+d5d75b09 scrape
 f02a1535 VISION_DOC
 12634071 MIN_PICTURE_PT
 52ffc8dd SCAN_DPI

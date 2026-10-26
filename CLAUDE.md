@@ -33,7 +33,7 @@ Response shape and block fields are documented in README.md.
 
 ## Rules when changing code
 - Run before committing:
-  - `python tests/test_layout.py` (must print all passed)
+  - `python tests/test_layout.py` and `python tests/test_contract.py` (must print all passed)
   - `python tests/make_samples.py tests/samples && python pdf2md.py tests/samples/report.pdf --images none -o /tmp/r.md && diff /tmp/r.md tests/out/report.md`
   - compare old vs new output on a corpus of real PDFs and review every changed file
   - check that every block's `markdownSpan` slices to its `content` (`--blocks` JSON).

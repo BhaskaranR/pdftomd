@@ -2038,17 +2038,34 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
 
 # ───────────────────────────── 11. Firecrawl-style API ────────────────────
 
+def is_pdf_buffer(data: bytes) -> bool:
+    """Firecrawl's isPdfBuffer: `%PDF` anywhere in the first 1 KB (BOM, whitespace
+    or junk may come first)."""
+    return b"%PDF" in data[:1024]
+
+
 def _parser_opts(parsers):
-    """Normalize Firecrawl `parsers` -> (pdf_options or None, image_enabled)."""
+    """Normalize Firecrawl `parsers` -> (pdf_options or None, image_enabled).
+    As in Firecrawl's schema: only "pdf" and "image" (string or object form), the
+    image object takes no options, and the deprecated pdf option `pageMarkdown`
+    folds into `pages` (an explicit `pages` wins)."""
     if parsers is None:
         parsers = ["pdf", "image"]
     pdf_opts, image_on = None, False
     for p in parsers:
-        ptype = p if isinstance(p, str) else (p or {}).get("type")
+        ptype = p if isinstance(p, str) else p.get("type") if isinstance(p, dict) else None
         if ptype == "pdf":
             pdf_opts = {} if isinstance(p, str) else dict(p)
+            alias = pdf_opts.pop("pageMarkdown", None)
+            if pdf_opts.get("pages") is None and alias is not None:
+                pdf_opts["pages"] = alias
         elif ptype == "image":
+            extra = sorted(set(p) - {"type"}) if isinstance(p, dict) else []
+            if extra:
+                raise ValueError(f"image parser takes no options: {extra}")
             image_on = True
+        else:
+            raise ValueError(f'unknown parser {p!r}: use "pdf" or "image"')
     return pdf_opts, image_on
 
 
@@ -2069,7 +2086,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     data, name, is_url = load_source(url)
     pdf_opts, image_on = _parser_opts(parsers)
     meta = {"sourceURL" if is_url else "sourceFile": url if is_url else name}
-    is_pdf = b"%PDF-" in data[:1024]
+    is_pdf = is_pdf_buffer(data)
     warnings = [f"format '{f}' is not supported for files; ignored"
                 for f in formats if f != "markdown"]
 
