@@ -4,8 +4,8 @@
   python make_skill.py                 # -> dist/pdf-to-markdown/
   python make_skill.py --zip           # also dist/pdf-to-markdown.zip
 
-The skill is skill/SKILL.md and NOTICE plus copies of pdf2md.py, sheet2md.py
-(spreadsheets) and requirements.txt in scripts/. Only skill/SKILL.md lives in
+The skill is skill/SKILL.md, LICENSE and NOTICE plus copies of pdf2md.py, sheet2md.py
+(spreadsheets), chunk2md.py (chunks) and requirements.txt in scripts/. Only skill/SKILL.md lives in
 git; the copies are made here, so there is one of each script to edit.
 """
 import argparse
@@ -15,9 +15,11 @@ import shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILES = {"SKILL.md": "skill/SKILL.md",
+         "LICENSE": "LICENSE",
          "NOTICE": "NOTICE",
          "scripts/pdf2md.py": "pdf2md.py",
          "scripts/sheet2md.py": "sheet2md.py",
+         "scripts/chunk2md.py": "chunk2md.py",
          "scripts/requirements.txt": "requirements.txt"}
 
 

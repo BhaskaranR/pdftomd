@@ -38,7 +38,7 @@ d634174a INK_DPI                    35a99978 is_pdf_buffer
 c23a360a image_marks                16384e3e PDF_OPTIONS
 ff9f20eb page_stats                 f3d66931 _pdf_options
 e1abee19 classify                   52941aa0 _parser_opts
-b26df565 page_origin                15679fd5 scrape
+b26df565 page_origin                61d929a7 scrape
 b49fbfed extract_words              f02a1535 VISION_DOC
 d91b4ad0 group_lines                12634071 MIN_PICTURE_PT
 44c11210 merge_drop_caps            52ffc8dd SCAN_DPI
@@ -67,5 +67,5 @@ d6d51ee2 _bbox                      0fd2d222 prepare
 d924216f _OCR_WARNED                b7686859 summary
 9a508bc9 ocr_blocks                 b8b7de89 vision_main
 d17fc54d detect_rotation            edacb556 error_text
-b504d738 ocr_available              ff6b540b main
+b504d738 ocr_available              cf2b1cea main
 aa26e7d7 flatten_alpha
