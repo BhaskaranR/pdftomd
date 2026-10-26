@@ -5,16 +5,16 @@ description: Convert a PDF to Markdown, including tables, scanned pages, and cha
 
 # PDF to Markdown
 
-Scripts are in `scripts/`. They need Python with `pdfplumber`, `pypdfium2` and `Pillow`;
-Tesseract (`pytesseract` + the `tesseract` program) is needed for scanned pages and
-for checking numbers on pictures.
+The script is `scripts/pdf2md.py` (built into this folder by `make_skill.py` in the pdf2md repo). It needs Python with `pdfplumber`, `pypdfium2` and `Pillow`;
+Tesseract (`pytesseract` + the `tesseract` program) is required: `prepare` stops with an
+install hint without it, because every number is checked against OCR text.
 
 ## Steps
 
 1. Prepare. Run:
 
    ```
-   python scripts/pdf2md_vision.py prepare <input.pdf> <work_folder>
+   python scripts/pdf2md.py prepare <input.pdf> <work_folder>
    ```
 
    It converts the PDF to `<work_folder>/draft.md` and writes `<work_folder>/tasks.json`:
@@ -39,30 +39,34 @@ for checking numbers on pictures.
 3. Merge. Run:
 
    ```
-   python scripts/pdf2md_vision.py merge <work_folder> -o <output.md>
+   python scripts/pdf2md.py merge <work_folder> -o <output.md>
    ```
 
-   It checks every number in your answers against the page's own text (or OCR),
-   marks any number it can't find with ⚠, and writes the final Markdown.
+   It checks every number in your answers against the page's own text (or OCR): the value,
+   its sign (`-4.5`, `(1,200)`) and, in tables, its row. It marks every mismatch with ⚠
+   and writes the final Markdown.
    It prints one line per task.
 
 4. Report to the user:
    - where the Markdown file is;
-   - every line from step 3 that says `NOT FOUND`, `no answer`, or `unchecked`,
-     because those numbers need a person to check them against the image;
+   - every line from step 3 that says `NOT FOUND`, `SIGN DIFFERS`, `IN ANOTHER ROW`,
+     `ROW NOT CONFIRMED`, `no answer`, or `unchecked`, because those numbers need a person
+     to check them against the image;
    - how many values are estimates (`~`).
-   Do not say the numbers are verified when the merge output says otherwise.
+   Do not say the numbers are verified when the merge output says otherwise. A clean merge
+   report means every number was found on the page with its sign and row; it is not proof
+   that every cell is right.
 
 ## Options
 
 - `prepare --page-range 1-5,8` or `--max-pages N` for part of a large PDF.
 - `prepare --mode ocr` treats every page as a scan (for a PDF whose text layer is garbage).
-- `merge --page-markers` keeps `<!-- page N -->` between pages.
+- `merge --page-markers` puts `---` and `<!-- page N -->` between pages (none before the first).
 - Plain conversion without the image step: `python scripts/pdf2md.py <input.pdf> -o <output.md>`.
 
 ## Spreadsheets (xlsx, xlsm, csv)
 
-No image step. Run:
+No image step; `scripts/pdf2md.py` hands the file to `scripts/sheet2md.py` next to it. Run:
 
 ```
 python scripts/pdf2md.py <input.xlsx> -o <output.md>
