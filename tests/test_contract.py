@@ -409,21 +409,6 @@ def test_cli_and_tools(pdf):
     check("prepare on a missing file: error message, no traceback",
           code == 1 and "Traceback" not in err and err.startswith("error:"), err[-300:])
 
-    import subprocess
-    tool = os.path.join(os.path.dirname(HERE), "make_skill.py")
-    victim = os.path.join(TMP, "precious")
-    os.makedirs(victim, exist_ok=True)
-    open(os.path.join(victim, "notes.txt"), "w").write("keep me")
-    r = subprocess.run([sys.executable, tool, "--out", victim], capture_output=True, text=True)
-    check("make_skill refuses to replace a folder that isn't a built skill",
-          r.returncode != 0 and os.path.exists(os.path.join(victim, "notes.txt")), (r.returncode, r.stderr[-200:]))
-    out_dir = os.path.join(TMP, "skill_out")
-    r1 = subprocess.run([sys.executable, tool, "--out", out_dir], capture_output=True, text=True)
-    r2 = subprocess.run([sys.executable, tool, "--out", out_dir], capture_output=True, text=True)
-    check("make_skill builds, and rebuilds over its own output",
-          r1.returncode == 0 and r2.returncode == 0 and os.path.exists(os.path.join(out_dir, "scripts", "pdf2md.py")),
-          (r1.stderr[-200:], r2.stderr[-200:]))
-
 
 # ---- PDF header detection (isPdfBuffer.test.ts) ----
 

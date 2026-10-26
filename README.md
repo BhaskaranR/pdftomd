@@ -200,13 +200,8 @@ p2_layout: kept rule-based output: words not on the page: and, stayed, as, plann
 Firecrawl routes a whole document to its hosted parser when any page has a table or columns; this does it
 per page, with the agent's model, and checks the result against the text layer.
 
-To install it as an agent skill, build the skill folder (SKILL.md + copies of `pdf2md.py` and `sheet2md.py`):
-
-```bash
-python make_skill.py          # -> dist/pdf-to-markdown/   (--zip for a .zip)
-```
-
-Only `skill/SKILL.md` is kept in git; the scripts are copied in by `make_skill.py`.
+To install it as an agent skill, follow "Install" in `skill/SKILL.md`: a folder with SKILL.md,
+LICENSE, NOTICE and `scripts/` holding the three code files, checked with `--verify`.
 Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped without it).
 
 ## Limits
@@ -241,18 +236,19 @@ python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scoreca
 
 ## Transcription check
 
-If you retype or OCR this code into another environment, verify the copy:
+If you copy, retype or OCR this code into another environment, each file checks itself:
 
 ```bash
-python verify_transcription.py pdf2md.py > mine.txt
-diff fingerprints.txt mine.txt     # no output = identical code
+python3 pdf2md.py --verify        # "all N functions and constants match", or the names that differ
+python3 sheet2md.py --verify
+python3 chunk2md.py --verify
 ```
 
-Each line is a fingerprint of one function or constant. Whitespace and comments
-don't count; any change to code, numbers, or regexes does. Works the same on
-Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots. `fingerprints_sheet.txt` and
-`fingerprints_chunk.txt` are the lists for `sheet2md.py` and `chunk2md.py`.
-If nearly every line differs, recheck `verify_transcription.py` itself first.
+Nothing else is needed on the other side: the fingerprint list (one entry per function or constant)
+is at the end of each file. Whitespace and comments don't count; any change to code, numbers or
+strings does; works the same on Python 3.11-3.13. After a code change, `python3 pdf2md.py --refresh`
+(and the same for the other two) rewrites the file's own list; tests/test_handover.py fails if one is
+stale. The code files are plain ASCII, so nothing is lost in copying.
 
 ## License
 

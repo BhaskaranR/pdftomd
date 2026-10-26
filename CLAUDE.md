@@ -9,8 +9,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 ## Layout
 - One file per document format, each self-contained: `pdf2md.py` (PDFs, vision step, `scrape()` routing),
   `sheet2md.py` (spreadsheets); a future Word/PowerPoint converter gets its own file. `scrape()` imports the other
-  files lazily. Don't fold formats into one file. Never commit copies: `skill/SKILL.md` = the skill's instructions;
-  `python make_skill.py` builds the installable folder in `dist/pdf-to-markdown/` from the real files (add new ones to its FILES).
+  files lazily. Don't fold formats into one file. Never commit copies: `skill/SKILL.md` = the skill's instructions,
+  and its "Install" section lists the folder to build by hand from the real files (add new code files there).
 - `pdf2md.py` — extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
   scanned pages; number check against page text/OCR; opt-in `--hard-pages`: text pages with tables/columns, used only
@@ -22,8 +22,9 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   opt-in chart tables. `convert()`, CLI. Tests: `tests/test_sheet.py`.
 - `tests/make_workbooks.py` — synthetic workbooks + CSVs; `tests/out/workbooks/*.md` = anydoc's output for them.
   `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs sheet2md against it.
-- `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` (pdf2md.py), `fingerprints_sheet.txt`
-  (sheet2md.py), `fingerprints_chunk.txt` (chunk2md.py) — per-function fingerprints for checking a retyped copy.
+- Transcription check inside each code file (last section, identical text in all three): `python3 <file> --verify`
+  checks a copied/retyped file against its own fingerprint list; `python3 <file> --refresh` rewrites the list.
+  Code files stay plain ASCII (non-ASCII as \uXXXX escapes). No separate fingerprint files or tools.
 - `tests/make_samples.py` — builds `tests/samples/report.pdf` and `scanned.pdf` (needs reportlab).
 - `tests/fonts.py` — `font()` for drawing synthetic scans (DejaVu on Linux, Arial/Times on macOS).
 - `tests/out/report.md`, `report.json` — expected output for the sample report.
@@ -65,11 +66,9 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
   - `python tests/test_sheet.py` (must print all passed)
   - `python tests/test_chunk.py` (must print all passed)
   - `python tests/test_fonts.py` (must print all passed)
-- Any code change invalidates the fingerprints: regenerate with
-  `python verify_transcription.py pdf2md.py > fingerprints.txt` and rebuild `fingerprints_2col.txt`
-  (first half left, second half right, left column padded to its widest entry + 2);
-  `python verify_transcription.py sheet2md.py > fingerprints_sheet.txt`.
-  `python verify_transcription.py chunk2md.py > fingerprints_chunk.txt`.
+  - `python tests/test_handover.py` (must print all passed: code files plain ASCII, built-in check current)
+- Any code change invalidates the fingerprints: run `python3 pdf2md.py --refresh`, `python3 sheet2md.py --refresh`,
+  `python3 chunk2md.py --refresh` (tests/test_handover.py fails if a list is stale).
 - Don't change thresholds without a test that shows the improvement.
 
 ## Decisions
@@ -84,7 +83,9 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
   No openpyxl — it would change values (its own date detection); read the XML directly like anydoc.
 - One file per format, not one file for everything (2026-10-26): folding spreadsheets in made pdf2md.py ~4,700 lines
   and growing with each format (PR #3, closed). The old one-file rule was about committed copies drifting;
-  make_skill.py building the skill from the real files solves that with several files too.
+  building the skill folder from the real files (SKILL.md "Install") solves that with several files too.
+- No build tools or fingerprint .txt files (2026-10-26): the owner sends only the code files; the check lives in
+  each file (--verify / --refresh) and the skill folder is assembled by hand from SKILL.md's steps.
 
 ## Open work
 1. Done: LICENSE (MIT) + NOTICE (pdf-inspector + anydoc).

@@ -5,7 +5,19 @@ description: Convert a PDF to Markdown, including tables, scanned pages, and cha
 
 # PDF to Markdown
 
-The script is `scripts/pdf2md.py` (built into this folder by `make_skill.py` in the pdf2md repo). It needs Python with `pdfplumber`, `pypdfium2` and `Pillow`;
+## Install
+
+Make a folder `pdf-to-markdown/` with this file (`SKILL.md`), `LICENSE`, `NOTICE`, and a `scripts/`
+folder holding `pdf2md.py`, `sheet2md.py` and `chunk2md.py` from the pdf2md repo. Then:
+
+```
+pip install pdfplumber pypdfium2 Pillow pytesseract     # + the tesseract program (brew / apt)
+python3 scripts/pdf2md.py --verify                      # "all ... match" = an exact copy
+python3 scripts/sheet2md.py --verify
+python3 scripts/chunk2md.py --verify
+```
+
+The script is `scripts/pdf2md.py`. It needs Python with `pdfplumber`, `pypdfium2` and `Pillow`;
 Tesseract (`pytesseract` + the `tesseract` program) is required: `prepare` stops with an
 install hint without it, because every number is checked against OCR text.
 
