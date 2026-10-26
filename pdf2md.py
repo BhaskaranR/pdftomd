@@ -2547,6 +2547,83 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
 # ---- merge ----
 
 TABLE_BLOCK_RE = re.compile(r"(?:^\|.*\|[ \t]*(?:\n|$))+", re.M)
+WORD_RE = re.compile(r"[^\W\d_]{2,}")
+# Provisional limits for a whole-page (layout) answer against the page's text layer: (at least,
+# share of the page's words). Set from the evaluation on real pages (tasks/hard-pages.md, D).
+LAYOUT_MAX_NEW_WORDS = (2, 0.005)      # answer words that are not on the page
+LAYOUT_MAX_MISSING_WORDS = (3, 0.01)   # page words left out of the answer
+LAYOUT_MAX_NEW_PAIRS = (3, 0.01)       # answer word pairs found neither in our draft nor on a page line
+
+
+def _words(text):
+    return WORD_RE.findall(re.sub(r"(\w)-\n(\w)", r"\1\2", text).lower())
+
+
+def _pairs(words):
+    return list(zip(words, words[1:]))
+
+
+def word_check(answer, native, ours):
+    """Does a whole-page answer say what the page says? -> list of problems (empty = ok)."""
+    page = Counter(_words(native))
+    n = max(sum(page.values()), 1)
+    left = page.copy()
+    new = []
+    for w in _words(answer):
+        if left[w]:
+            left[w] -= 1
+        else:
+            new.append(w)
+    missing = sum(left.values())
+    known = set(_pairs(_words(ours))) | {p for line in native.splitlines() for p in _pairs(_words(line))}
+    new_pairs = {p for p in _pairs(_words(answer)) if p not in known}
+    limit = lambda rule: max(rule[0], rule[1] * n)
+    problems = []
+    if len(new) > limit(LAYOUT_MAX_NEW_WORDS):
+        problems.append(f"words not on the page: {', '.join(new[:8])}")
+    if missing > limit(LAYOUT_MAX_MISSING_WORDS):
+        problems.append(f"page words missing from the answer: {missing} of {n}")
+    if len(new_pairs) > limit(LAYOUT_MAX_NEW_PAIRS):
+        problems.append(f"word order not on the page: {len(new_pairs)} pairs")
+    return problems
+
+
+def _merge_hard(t, answer, pages):
+    """A tables/layout answer for a text page: used only if it matches the text layer, else ours stays.
+    Returns the report fields."""
+    out = {}
+    page_md = pages.get(t["page"], "")
+
+    def kept(why):
+        out["status"] = f"kept rule-based output: {why}"
+        return out
+    if t["kind"] == "tables":
+        theirs = [m.group().strip() for m in TABLE_BLOCK_RE.finditer(answer)]
+        ours = list(TABLE_BLOCK_RE.finditer(page_md))
+        if not len(theirs) == len(ours) == t["tables"]:
+            return kept(f"table count differs (answer {len(theirs)}, page {t['tables']})")
+        checked = "\n\n".join(theirs)
+    else:
+        checked = answer
+    _, issues, estimated = check_answer(checked, t["check_text"])
+    out.update(issues)
+    if estimated:
+        return kept(f"{estimated} estimated value(s) on a page with a text layer")
+    if issues["unverified"] or issues["sign"] or issues["wrong_row"]:
+        return kept("numbers don't match the page")
+    if t["kind"] == "tables":
+        for m, table in reversed(list(zip(ours, theirs))):
+            end = m.start() + len(m.group().rstrip("\n"))
+            page_md = page_md[:m.start()] + table + page_md[end:]
+        pages[t["page"]] = page_md
+        out["status"] = f"merged {len(theirs)} table{'s' * (len(theirs) != 1)}"
+        return out
+    problems = word_check(answer, t["check_text"], page_md)
+    if problems:
+        return kept("; ".join(problems))
+    pages[t["page"]] = answer.strip()
+    out["status"] = "merged page"
+    return out
 
 PAGE_SPLIT = re.compile(r"<!-- page (\d+) -->\n?")
 
@@ -2570,13 +2647,13 @@ def merge(work, page_markers=False):
             entry["status"] = "no answer: original output kept"
             report.append(entry)
             continue
-        if t["kind"] in ("tables", "layout"):
-            entry["status"] = "kept rule-based output (hard-page answers are not merged yet)"
-            report.append(entry)
-            continue
         with open(ans_path, encoding="utf-8") as f:
             answer = f.read().strip()
         answer = re.sub(r"^```\w*\n|\n```$", "", answer).strip()  # stray code fences
+        if t["kind"] in ("tables", "layout"):
+            entry.update(_merge_hard(t, answer, pages))
+            report.append(entry)
+            continue
         if t["kind"] == "picture" and answer.upper().startswith("NONE"):
             entry["status"] = "not a chart or table"
             report.append(entry)

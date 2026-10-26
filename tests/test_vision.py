@@ -344,8 +344,7 @@ def test_hard_pages_prepare():
                                                              if t["kind"] in ("tables", "layout")] == [1], man["tasks"])
         md, rep = pv.merge(work)
         check("hard-page task without an answer: rule-based output kept",
-              "| Rates | 1,250 | (300) |" in md.replace("  ", " ") or "Rates" in md, md[:300])
-        check("hard-page tasks reported", {e["id"] for e in rep} >= {"p1_tables", "p2_layout"}, rep)
+              "| Rates | 1,250 | (300) |" in md and entry(rep, "p1_tables")["status"].startswith("no answer"), rep)
 
         scan = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
         man = pv.prepare(scan, os.path.join(tmp, "ws"), hard_pages=True)
@@ -359,6 +358,56 @@ def test_hard_pages_prepare():
         check("cli prepare --hard-pages lists them with a reason",
               r.returncode == 0 and "p1_tables: tables, page 1" in r.stdout and "1 table" in r.stdout
               and "p2_layout: layout, page 2" in r.stdout, r.stdout + r.stderr[-300:])
+
+
+GOOD_TABLE = ("| Desk | Q1 | Q2 |\n|:---|---:|---:|\n| Rates | 1,250 | (300) |\n"
+              "| Credit | 980 | 1,410 |\n| Equities | 2,045 | 1,990 |")
+
+
+def test_hard_pages_merge():
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = hard_pages_pdf(os.path.join(tmp, "hard.pdf"))
+        work = os.path.join(tmp, "w")
+        pv.prepare(pdf, work, hard_pages=True)
+        with open(os.path.join(work, "draft.md")) as fh:
+            ours = pv._split_pages(fh.read())
+
+        def run(tid, answer):
+            write_answer(work, tid, answer)
+            md, rep = pv.merge(work)
+            return md, entry(rep, tid)
+
+        md, e = run("p1_tables", GOOD_TABLE)
+        check("tables: correct answer replaces our table", "|:---|---:|---:|" in md and e["status"] == "merged 1 table", e)
+        check("tables: text around the table kept", "Desk volumes moved" in md and "# Quarterly Desk Summary" in md)
+        check("tables: no warning marks in an accepted table", "⚠" not in md)
+        for name, ans, why in (
+                ("wrong number", GOOD_TABLE.replace("1,250", "1,520"), "NOT FOUND"),
+                ("sign dropped", GOOD_TABLE.replace("(300)", "300"), "SIGN DIFFERS"),
+                ("rows swapped", GOOD_TABLE.replace("| 980 | 1,410 |", "| 2,045 | 1,990 |", 1)
+                 .replace("| Equities | 2,045 | 1,990 |", "| Equities | 980 | 1,410 |"), "IN ANOTHER ROW"),
+                ("two tables for one", GOOD_TABLE + "\n\n| A | B |\n|---|---|\n| x | 1 |", "table count"),
+                ("estimated value", GOOD_TABLE.replace("1,410", "~1,410"), "estimate"),
+                ("no table at all", "The table shows desk volumes.", "table count")):
+            md, e = run("p1_tables", ans)
+            check(f"tables, {name}: ours kept", "|:---|" not in md and "| Rates | 1,250 | (300) |" in md, md[:400])
+            check(f"tables, {name}: reason given", e["status"].startswith("kept rule-based") and why in pv.summary([e]),
+                  pv.summary([e]))
+            check(f"tables, {name}: our table unmarked", "⚠" not in md)
+        write_answer(work, "p1_tables", GOOD_TABLE)
+
+        good = ours[2]
+        md, e = run("p2_layout", good)
+        check("layout: faithful answer replaces the page", e["status"] == "merged page", e)
+        para = "while costs held flat against the plan approved by the committee in the spring review."
+        for name, ans, why in (
+                ("paraphrased sentence", good.replace(para, "and costs stayed flat as planned.", 1), "words"),
+                ("paragraph dropped", "\n\n".join(good.split("\n\n")[1:]), "missing"),
+                ("sentence invented", good + "\n\nRevenue rose sharply after the merger closed.", "words"),
+                ("number changed", good.replace("Column paragraph 3.", "Column paragraph 9."), "NOT FOUND")):
+            md, e = run("p2_layout", ans)
+            check(f"layout, {name}: ours kept", e["status"].startswith("kept rule-based") and good.split("\n\n")[0] in md, e)
+            check(f"layout, {name}: reason given", why in pv.summary([e]), pv.summary([e]))
 
 
 def test_missing_answer():
@@ -399,6 +448,7 @@ if __name__ == "__main__":
         test_page_markers()
         test_blank_page()
         test_hard_pages_prepare()
+        test_hard_pages_merge()
         test_missing_answer()
         test_cli()
     else:
