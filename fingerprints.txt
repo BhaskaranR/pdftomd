@@ -10,7 +10,7 @@ d22aaca5 FURNITURE_MIN_PAGES
 77b86762 FURNITURE_Y_STDDEV
 2c5ba94a MIN_IMAGE_PT
 0fea4957 BULLETS
-a3d4ff41 BULLET_RE
+46ce098c BULLET_RE
 21f3a276 NUMBERED_RE
 e07b829a MONO_RE
 caab2860 BOLD_RE
@@ -38,6 +38,15 @@ d634174a INK_DPI
 c23a360a image_marks
 ff9f20eb page_stats
 e1abee19 classify
+49a7793a SYMBOL_FONT_TABLES
+b6891741 _parse_symbol_table
+03a22872 SYMBOL_TABLES
+4e41fa37 BASE14_SYMBOL_NAMES
+5211ebff OWN_ENCODING
+60e28b09 _symbol_table_for
+f320ed33 _clean_private_use
+a5f1ae68 _fix_symbol_font
+7b9818dd open_pdf
 b26df565 page_origin
 b49fbfed extract_words
 d91b4ad0 group_lines
@@ -89,12 +98,12 @@ ba0627dd line_text
 11f26a58 header_level
 acdd0074 is_list_item
 44842f07 hanging_number
-b11f7fc3 list_marker
+bbf2ee8b list_marker
 0acdb09d styled_text
 f72dbe3f join_paragraph
 f1ea6914 CAPTION_RE
 c8328707 box_of
-bb845a58 render_blocks
+82d58dd9 render_blocks
 d5a7e4ae postprocess_fragment
 622593b6 overlap_fraction
 eccff5ef union_box
@@ -104,7 +113,7 @@ dd4c64f8 UnsupportedFileError
 5528f080 PAGE_MARKER
 8955307f load_source
 4e7879c8 _fetch
-48e19bad convert
+1ca1b395 convert
 35a99978 is_pdf_buffer
 16384e3e PDF_OPTIONS
 f3d66931 _pdf_options
@@ -135,7 +144,7 @@ db6a296d _keys
 4fbca3c0 check_answer
 927eae4f _upright
 c784404e _ocr_text
-c6945321 prepare
+7659d7e7 prepare
 14856fb5 TABLE_BLOCK_RE
 712e45a3 LAYOUT_MAX_NEW_WORDS
 fc3b5933 LAYOUT_MAX_MISSING_WORDS
