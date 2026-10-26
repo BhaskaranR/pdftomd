@@ -14,12 +14,15 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 - `pdf2md.py` — extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
   scanned pages; number check against page text/OCR). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
+- `chunk2md.py` — `chunk()`: the final markdown cut into pieces for embeddings, for every format (reads markdown
+  structure; PDF blocks add pages/bboxes via markdownSpan). Stdlib only, so search code can import it without PDF
+  libraries. `scrape(chunk=…)` / `--chunks` load it lazily. Tests: `tests/test_chunk.py`.
 - `sheet2md.py` — spreadsheets: zip+XML reader (stdlib only), number formats, header-row guess, GFM tables, CSV,
   opt-in chart tables. `convert()`, CLI. Tests: `tests/test_sheet.py`.
 - `tests/make_workbooks.py` — synthetic workbooks + CSVs; `tests/out/workbooks/*.md` = anydoc's output for them.
   `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs sheet2md against it.
 - `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` (pdf2md.py), `fingerprints_sheet.txt`
-  (sheet2md.py) — per-function fingerprints for checking a retyped copy.
+  (sheet2md.py), `fingerprints_chunk.txt` (chunk2md.py) — per-function fingerprints for checking a retyped copy.
 - `tests/make_samples.py` — builds `tests/samples/report.pdf` and `scanned.pdf` (needs reportlab).
 - `tests/fonts.py` — `font()` for drawing synthetic scans (DejaVu on Linux, Arial/Times on macOS).
 - `tests/out/report.md`, `report.json` — expected output for the sample report.
@@ -58,10 +61,12 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
   - compare old vs new output on a corpus of real PDFs and review every changed file
   - check that every block's `markdownSpan` slices to its `content` (`--blocks` JSON).
   - `python tests/test_sheet.py` (must print all passed)
+  - `python tests/test_chunk.py` (must print all passed)
 - Any code change invalidates the fingerprints: regenerate with
   `python verify_transcription.py pdf2md.py > fingerprints.txt` and rebuild `fingerprints_2col.txt`
   (first half left, second half right, left column padded to its widest entry + 2);
   `python verify_transcription.py sheet2md.py > fingerprints_sheet.txt`.
+  `python verify_transcription.py chunk2md.py > fingerprints_chunk.txt`.
 - Don't change thresholds without a test that shows the improvement.
 
 ## Decisions
@@ -79,11 +84,11 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
   make_skill.py building the skill from the real files solves that with several files too.
 
 ## Open work
-1. LICENSE (owner to choose; MIT suggested). NOTICE done (pdf-inspector + anydoc).
+1. Done: LICENSE (MIT) + NOTICE (pdf-inspector + anydoc).
 2. Done for charts/pictures/scans via `pdf2md.py prepare`/`merge` (the office runs skills + MCP only, so the agent's
    model reads the images; no API calls from Python). Not yet: sending hard *text* pages (complex tables,
    multi-column) through the same step.
 3. Wingdings/symbol-font arrows (e.g. rank up/down) come out as unreadable glyphs; needs the font name from a real file.
-4. `chunk()` for embeddings: split by heading path, keep tables/code whole, attach page number and bbox.
+4. Done: `chunk()` for embeddings (`chunk2md.py`; `scrape(chunk=…)`, `--chunks`).
 5. Spreadsheets: .xls, .xlsb, .ods (anydoc reads all three in-house; .xls parked 2026-10-26 until real files need it).
    Pictures in workbooks → vision step.
