@@ -88,7 +88,7 @@ def clean_text(text: str) -> str:
         c = text[i]
         if c == "\xa0":
             out.append(" ")
-        elif c in "\xad​﻿":
+        elif c in "\xad\u200b\ufeff":
             pass
         elif c == "\t":
             out.append("\t")

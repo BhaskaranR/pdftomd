@@ -16,7 +16,7 @@ dac1fcc5 X_VML_NS
 c053ad6d SheetError
 3b593b7f Result
 38dc8a4e rust_round
-83a03cb4 clean_text
+c984a432 clean_text
 46969ee9 collapse_ws
 6955a67c rust_display
 11db4b36 format_float
