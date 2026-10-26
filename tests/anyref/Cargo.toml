@@ -1,0 +1,10 @@
+# Reference converter: Firecrawl's anydoc, run locally (no API key, no upload).
+# Firecrawl's API pins anydoc "0.2.2" with no lockfile, so it gets the newest 0.2.x — 0.2.4 as of 2026-10-26.
+# Build: cargo build --release --manifest-path tests/anyref/Cargo.toml   (Rust 1.88+)
+[package]
+name = "anyref"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anydoc = "=0.2.4"

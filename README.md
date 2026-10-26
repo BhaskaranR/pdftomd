@@ -85,6 +85,42 @@ python pdf2md.py receipt.jpg                                # image parser (OCR)
 | Layout | Two-column detection and reading order; running headers/footers and page numbers stripped (`markdown/furniture.rs` rules); drop caps re-attached |
 | Scanned PDFs | Classified like `detector.rs`; `auto`/`ocr` modes run Tesseract (paragraphs, headings by text height, confidence). Pages scanned sideways or upside down are detected and turned upright first. Without Tesseract the page image is kept |
 
+## Spreadsheets (xlsx, xlsm, csv)
+
+Same output as Firecrawl, which converts spreadsheets with its MIT-licensed
+[`anydoc`](https://github.com/firecrawl/anydoc) crate; `sheet2md.py` is a port of its sheet and CSV
+readers (standard library only). `scrape()` and the CLI pick it automatically — from the URL path or
+file name, then the Content-Type, then the file's bytes — so the same calls work:
+
+```bash
+python pdf2md.py budget.xlsx -o budget.md
+python pdf2md.py https://site.com/export.csv
+python sheet2md.py budget.xlsx --include-hidden      # spreadsheet-only CLI
+```
+
+```python
+resp = scrape("budget.xlsx", include_hidden=False)
+resp["data"]["markdown"]     # one string for the whole workbook
+resp["data"]["metadata"]     # sourceFile/sourceURL, contentType, numSheets, sheetNames
+resp["data"].get("warning")  # e.g. formula cells with no saved value
+```
+
+| Rule | |
+|---|---|
+| Sheets | Every visible sheet, in workbook order. `## <sheet name>` before each table only when more than one sheet is visible. Empty sheets are skipped |
+| Table | One per sheet, covering the area from the first to the last filled cell. Blank rows inside it stay |
+| Hidden | Hidden sheets, rows and columns are left out; `include_hidden` / `--include-hidden` keeps them (not in Firecrawl) |
+| Merged cells | Value in the top-left cell, the cells it covers blank |
+| Header row | Guessed: the first row is a header when it reads as labels over typed columns (numbers, dates, TRUE/FALSE); otherwise the table gets an empty header row |
+| Values | Saved formula results; number formats applied (`$1,234.50`, `7.5%`, `(2,500.00)`); dates as `2026-03-15`; 15 significant digits |
+| Formulas with no saved value | Blank, and counted in `warning` (not in Firecrawl) — common in files written by scripts; re-save in Excel to fill them |
+| CSV | Separator (`,` `;` tab `|`) and encoding (UTF-8, UTF-16, Windows-1252) detected |
+| Not converted | Charts and pictures inside workbooks. PDF options (`mode`, `pages`, `blocks`, `pageMarkers`, `maxPages`) are ignored; `parsers: []` still returns base64 |
+| Errors | `SPREADSHEET_TOO_LARGE` (over 4,000,000 cells across the workbook), `SPREADSHEET_ENCRYPTED` (password-protected), `SPREADSHEET_UNSUPPORTED` (.xls, .xlsb — not yet), `SPREADSHEET_UNREADABLE` |
+
+Tests: `python tests/test_sheet.py`. Checked byte-for-byte against Firecrawl's own converter (anydoc 0.2.4,
+built locally — no API key) on a synthetic set of workbooks and CSV files: `python tests/compare_anydoc.py`.
+
 ## Charts and scanned pages (vision step)
 
 `pdf2md_vision.py` adds chart data and scanned-page structure using the agent's own vision
@@ -117,6 +153,8 @@ Tests: `python tests/test_vision.py`.
 python tests/make_samples.py tests/samples   # builds report.pdf + scanned.pdf
 python pdf2md.py tests/samples/report.pdf -o tests/out/report.md
 python tests/test_layout.py                  # side-by-side tables, charts, and must-not-change cases
+python tests/test_sheet.py                   # spreadsheets: Firecrawl sample + anydoc cases + synthetic set
+python tests/compare_anydoc.py               # sheet2md vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
 
@@ -131,5 +169,6 @@ diff fingerprints.txt mine.txt     # no output = identical code
 
 Each line is a fingerprint of one function or constant. Whitespace and comments
 don't count; any change to code, numbers, or regexes does. Works the same on
-Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots.
+Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots. For the other files: `fingerprints_sheet.txt`
+(sheet2md.py) and `fingerprints_vision.txt` (pdf2md_vision.py).
 If nearly every line differs, recheck `verify_transcription.py` itself first.

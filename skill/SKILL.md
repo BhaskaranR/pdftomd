@@ -1,6 +1,6 @@
 ---
 name: pdf-to-markdown
-description: Convert a PDF to Markdown, including tables, scanned pages, and chart data.
+description: Convert a PDF to Markdown, including tables, scanned pages, and chart data. Also converts Excel and CSV spreadsheets (xlsx, xlsm, csv) to Markdown tables.
 ---
 
 # PDF to Markdown
@@ -59,3 +59,16 @@ for checking numbers on pictures.
 - `prepare --mode ocr` treats every page as a scan (for a PDF whose text layer is garbage).
 - `merge --page-markers` keeps `<!-- page N -->` between pages.
 - Plain conversion without the image step: `python scripts/pdf2md.py <input.pdf> -o <output.md>`.
+
+## Spreadsheets (xlsx, xlsm, csv)
+
+No image step. Run:
+
+```
+python scripts/pdf2md.py <input.xlsx> -o <output.md>
+```
+
+Each visible sheet becomes one table, headed `## <sheet name>` when there is more than one.
+Hidden sheets, rows and columns are left out; add `--include-hidden` to keep them.
+Report to the user any `warning:` line it prints (for example, formula cells that had no
+saved value and came out blank) and any `error:` line, word for word.
