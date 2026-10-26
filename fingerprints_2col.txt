@@ -32,7 +32,7 @@ cb4b19d9 parse_pages                48e19bad convert
 8e04e66b table_to_md                16384e3e PDF_OPTIONS
 c85d3580 image_coverage             f3d66931 _pdf_options
 7dbb9b40 SCAN_COVERAGE              52941aa0 _parser_opts
-c3d57613 SCAN_MAX_NATIVE_CHARS      15679fd5 scrape
+c3d57613 SCAN_MAX_NATIVE_CHARS      61d929a7 scrape
 bfb84b3d SCAN_MAX_MARKS             f02a1535 VISION_DOC
 d634174a INK_DPI                    12634071 MIN_PICTURE_PT
 c23a360a image_marks                52ffc8dd SCAN_DPI
@@ -73,5 +73,5 @@ aa26e7d7 flatten_alpha              2107f7fd _split_pages
 e7e65bb9 segment_regions            b7686859 summary
 d6bec067 rule_spans_columns         b5ee0cf8 vision_main
 25954202 region_of                  edacb556 error_text
-f156af47 find_gutter                ff6b540b main
+f156af47 find_gutter                cf2b1cea main
 05c03f7d split_at

@@ -130,6 +130,38 @@ resp["data"].get("warning")  # e.g. formula cells with no saved value
 Tests: `python tests/test_sheet.py`. Checked byte-for-byte against Firecrawl's own converter (anydoc 0.2.4,
 built locally — no API key) on a synthetic set of workbooks and CSV files: `python tests/compare_anydoc.py`.
 
+## Chunks for embeddings
+
+For search or an assistant that answers from these documents (RAG), the markdown is cut into pieces
+that each make sense on their own and point back to the source. Not in Firecrawl.
+
+```bash
+python pdf2md.py report.pdf --chunks                     # JSON with data.chunks (default 2,000 chars each)
+python pdf2md.py budget.xlsx --chunks --chunk-size 1000
+python chunk2md.py notes.md                              # chunk markdown you already have
+```
+
+```python
+resp = scrape("report.pdf", chunk={"maxChars": 2000})   # or chunk=True
+for c in resp["data"]["chunks"]:
+    c["text"]          # what to embed: "Annual Report > Loans" + the piece
+    c["headingPath"]   # ["Annual Report", "Loans"]; a spreadsheet gives ["Sheet"] or ["Sheet", "Chart: X"]
+    c["content"], c["markdownSpan"]   # the piece and where it sits in data.markdown
+    c["pages"], c["bboxes"]           # PDFs: pages and boxes (0–1) it came from
+
+from chunk2md import chunk                           # standard library only: no PDF libraries needed
+chunk(convert("report.pdf"), max_chars=1000)        # also takes a spreadsheet result or plain markdown
+```
+
+| Rule | |
+|---|---|
+| Sections | A chunk never spans two headings; whole blocks are packed up to the size (measured on `text`) |
+| Never cut | Paragraphs (a paragraph over the size is split at sentence ends), list items, code blocks, table rows |
+| Tables | Whole if they fit; otherwise split by rows with the header row repeated (`split: true`) |
+| Headings | A heading with nothing under it only appears in the paths; a heading never forms a chunk alone |
+| Left out | Page headers, footers and numbers; page markers |
+| `oversize: true` | A single row, list item or code block bigger than the size, kept whole |
+
 ## Charts and scanned pages (vision step)
 
 The `prepare` and `merge` commands of `pdf2md.py` add chart data and scanned-page structure using the agent's own vision
@@ -199,6 +231,7 @@ python pdf2md.py tests/samples/report.pdf -o tests/out/report.md
 python tests/test_layout.py                  # side-by-side tables, charts, and must-not-change cases
 python tests/test_contract.py                # Firecrawl options and PDF detection
 python tests/test_sheet.py                   # spreadsheets: Firecrawl sample + anydoc cases + synthetic set
+python tests/test_chunk.py                   # chunks for embeddings
 python tests/compare_anydoc.py               # sheet2md vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
@@ -214,6 +247,11 @@ diff fingerprints.txt mine.txt     # no output = identical code
 
 Each line is a fingerprint of one function or constant. Whitespace and comments
 don't count; any change to code, numbers, or regexes does. Works the same on
-Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots. `fingerprints_sheet.txt` is the list for
-`sheet2md.py`.
+Python 3.11–3.13. `fingerprints_2col.txt` is the same list laid out for screenshots. `fingerprints_sheet.txt` and
+`fingerprints_chunk.txt` are the lists for `sheet2md.py` and `chunk2md.py`.
 If nearly every line differs, recheck `verify_transcription.py` itself first.
+
+## License
+
+MIT — see `LICENSE`. Code ported from Firecrawl's MIT-licensed `pdf-inspector` and `anydoc`
+is credited in `NOTICE`.
