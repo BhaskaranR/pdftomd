@@ -1764,16 +1764,22 @@ PAGE_MARKER = "---\n\n<!-- page {n} -->"   # Firecrawl's pageMarkers join, betwe
 
 def load_source(src):
     """path | URL | bytes -> (bytes, display name, is_url)."""
+    return _fetch(src)[:3]
+
+
+def _fetch(src):
+    """path | URL | bytes -> (bytes, display name, is_url, content type or None)."""
     if isinstance(src, (bytes, bytearray)):
-        return bytes(src), "document.pdf", False
+        return bytes(src), "document.pdf", False, None
     if isinstance(src, str) and re.match(r"^https?://", src):
         req = urllib.request.Request(src, headers={"User-Agent": "pdf2md/1.0"})
         with urllib.request.urlopen(req, timeout=60) as r:
             data = r.read()
+            ctype = r.headers.get("Content-Type")
         name = os.path.basename(src.split("?")[0].rstrip("/")) or "document.pdf"
-        return data, name, True
+        return data, name, True, ctype
     with open(src, "rb") as f:
-        return f.read(), os.path.basename(src), False
+        return f.read(), os.path.basename(src), False, None
 
 
 def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
@@ -2118,18 +2124,26 @@ def _parser_opts(parsers):
 def scrape(url, formats=("markdown",), parsers=None, password=None,
            images: Optional[str] = None, image_dir: Optional[str] = None,
            link_base: Optional[str] = None, ocr_lang: str = "eng",
-           page_range: Optional[str] = None, image_dpi: int = 150) -> dict:
-    """Firecrawl /scrape-compatible call for PDFs and images.
+           page_range: Optional[str] = None, image_dpi: int = 150,
+           include_hidden: bool = False, filename: Optional[str] = None,
+           charts: bool = False) -> dict:
+    """Firecrawl /scrape-compatible call for PDFs, images and spreadsheets.
     parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file as
     base64. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
     "maxPages": int, "pages": bool, "blocks": bool, "pageMarkers": bool}.
     Extras (not in Firecrawl): "images": "save"|"embed"|"none" (default: "save"
     when image_dir is given, otherwise "embed" — no files are written unasked),
     page_range "1-5,8", image_dpi, ocr_lang.
+    Spreadsheets (xlsx, xlsm, csv) are found like Firecrawl does — URL path / file name,
+    then Content-Type, then the bytes — and converted by sheet2md; PDF options don't apply.
+    include_hidden keeps hidden sheets/rows/columns; charts adds each chart's saved numbers
+    as a table (not in Firecrawl); filename names a bytes source.
     """
     if images is None:
         images = "save" if image_dir else "embed"
-    data, name, is_url = load_source(url)
+    data, name, is_url, ctype = _fetch(url)
+    if filename:
+        name = filename
     pdf_opts, image_on = _parser_opts(parsers)
     meta = {"sourceURL" if is_url else "sourceFile": url if is_url else name}
     is_pdf = is_pdf_buffer(data)
@@ -2140,7 +2154,24 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
         return {"success": True, "data": {"base64": base64.b64encode(data).decode(),
                                           "metadata": meta}}
 
-    if is_pdf:
+    sheet_ext = None
+    if not is_pdf:
+        import sheet2md
+        sheet_ext = sheet2md.spreadsheet_ext(url if is_url else name, ctype, data)
+
+    if sheet_ext:
+        if parsers is not None and not parsers:
+            return raw()
+        r = sheet2md.convert(data, include_hidden=include_hidden, ext=sheet_ext, charts=charts)
+        if r.warning:
+            warnings.append(r.warning)
+        meta["contentType"] = sheet2md.CONTENT_TYPE_OF[sheet_ext]
+        if sheet_ext != ".csv":
+            meta.update({"numSheets": len(r.sheets), "sheetNames": r.sheets})
+        out = {"metadata": meta}
+        if "markdown" in formats:
+            out["markdown"] = r.markdown
+    elif is_pdf:
         if pdf_opts is None:
             return raw()
         unknown = set(pdf_opts) - {"type", "mode", "maxPages", "pages", "blocks",
@@ -2561,7 +2592,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(
         description="PDF to Markdown with Firecrawl-style options "
                     "(headings, paragraphs, lists, tables, images, OCR).")
-    ap.add_argument("input", help="PDF or image: path or http(s) URL")
+    ap.add_argument("input", help="PDF, image or spreadsheet (xlsx, xlsm, csv): path or http(s) URL")
     ap.add_argument("-o", "--output", help="output file (default: stdout)")
     ap.add_argument("--mode", choices=["fast", "auto", "ocr"], default="auto",
                     help="fast: embedded text only; auto: OCR pages with no text (default); "
@@ -2584,6 +2615,10 @@ def main(argv=None):
     ap.add_argument("--image-dpi", type=int, default=150)
     ap.add_argument("--ocr-lang", default="eng", help="Tesseract language(s), e.g. eng+hin")
     ap.add_argument("--password", help="password for encrypted PDFs")
+    ap.add_argument("--include-hidden", action="store_true",
+                    help="spreadsheets: keep hidden sheets, rows and columns")
+    ap.add_argument("--charts", action="store_true",
+                    help="spreadsheets: add each chart's saved numbers as a table (not in Firecrawl)")
     ap.add_argument("--info", action="store_true", help="print detection info to stderr")
     a = ap.parse_args(argv)
 
@@ -2609,13 +2644,15 @@ def main(argv=None):
             parsers = [opts, "image"]
         resp = scrape(a.input, parsers=parsers, password=a.password, images=a.images,
                       image_dir=image_dir, link_base=out_dir, ocr_lang=a.ocr_lang,
-                      page_range=a.page_range, image_dpi=a.image_dpi)
+                      page_range=a.page_range, image_dpi=a.image_dpi,
+                      include_hidden=a.include_hidden, charts=a.charts)
     except Exception as e:  # pdfminer wraps password / corruption errors
         msg = repr(e) + " " + repr(getattr(e, "__cause__", ""))
         if "PDFPasswordIncorrect" in msg:
             sys.exit("error: incorrect password" if a.password else
                      "error: this PDF is encrypted — pass --password")
-        sys.exit(f"error: {e or type(e).__name__}")
+        code = getattr(e, "code", None)
+        sys.exit(f"error: {code + ': ' if isinstance(code, str) else ''}{e or type(e).__name__}")
 
     d = resp["data"]
     if want_json:
@@ -2633,6 +2670,9 @@ def main(argv=None):
         print(f"warning: {d['warning']}", file=sys.stderr)
     if a.info or a.output:
         m = d.get("metadata", {})
+        if "contentType" in m:
+            print(f"type=spreadsheet sheets={m.get('numSheets', 1)}", file=sys.stderr)
+            return
         print(f"type={m.get('pdfType')} confidence={m.get('confidence')} "
               f"pages={m.get('numPages')}/{m.get('totalPages')} "
               f"needs_ocr={m.get('pagesNeedingOcr')} time={m.get('processingTimeMs')}ms",

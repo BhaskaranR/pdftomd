@@ -4,9 +4,9 @@
   python make_skill.py                 # -> dist/pdf-to-markdown/
   python make_skill.py --zip           # also dist/pdf-to-markdown.zip
 
-The skill is skill/SKILL.md plus a copy of pdf2md.py and requirements.txt in
-scripts/. Only skill/SKILL.md lives in git; the copy is made here, so there is
-one pdf2md.py to edit.
+The skill is skill/SKILL.md and NOTICE plus copies of pdf2md.py, sheet2md.py
+(spreadsheets) and requirements.txt in scripts/. Only skill/SKILL.md lives in
+git; the copies are made here, so there is one of each script to edit.
 """
 import argparse
 import filecmp
@@ -15,7 +15,9 @@ import shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FILES = {"SKILL.md": "skill/SKILL.md",
+         "NOTICE": "NOTICE",
          "scripts/pdf2md.py": "pdf2md.py",
+         "scripts/sheet2md.py": "sheet2md.py",
          "scripts/requirements.txt": "requirements.txt"}
 
 
