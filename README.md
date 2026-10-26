@@ -123,7 +123,7 @@ resp["data"].get("warning")  # e.g. formula cells with no saved value
 | Values | Saved formula results; number formats applied (`$1,234.50`, `7.5%`, `(2,500.00)`); dates as `2026-03-15`; 15 significant digits |
 | Formulas with no saved value | Blank, and counted in `warning` (not in Firecrawl) — common in files written by scripts; re-save in Excel to fill them |
 | CSV | Separator (`,` `;` tab `|`) and encoding (UTF-8, UTF-16, Windows-1252) detected |
-| Charts | Ignored by default, like Firecrawl. `charts=True` / `--charts` (not in Firecrawl) adds each chart under its sheet's table: `**Chart: <title>** (column)` and a table of categories × series, copied from the numbers the chart saved (no guessing). Charts with no saved numbers (common in files written by scripts) print `: no saved values` and a warning |
+| Charts | Ignored by default, like Firecrawl. `charts=True` / `--charts` (not in Firecrawl) adds each chart under its sheet's table: `**Chart: <title>** (column)` and a table of categories × series, copied from the numbers the chart saved (no guessing). A chart that saved no numbers (common in files written by scripts) is filled from the cells it points at — hidden rows and columns left out, as Excel does — with a warning saying so; if those cells can't be read (another workbook, a named range, unsaved formulas) it prints `: no saved values` |
 | Not converted | Pictures inside workbooks. PDF options (`mode`, `pages`, `blocks`, `pageMarkers`, `maxPages`) are ignored; `parsers: []` still returns base64 |
 | Errors | `SPREADSHEET_TOO_LARGE` (over 4,000,000 cells across the workbook), `SPREADSHEET_ENCRYPTED` (password-protected), `SPREADSHEET_UNSUPPORTED` (.xls, .xlsb — not yet), `SPREADSHEET_UNREADABLE` |
 

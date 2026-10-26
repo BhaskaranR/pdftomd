@@ -533,6 +533,66 @@ def charts_tests():
     eq("charts=True without charts changes nothing", md(golden_like, charts=True), md(golden_like))
 
 
+# ---------------------------------------------------------------- charts that saved no numbers
+FROM_CELLS_CHARTS = """**Chart: Loan mix** (column)
+
+|  | Loans | Deposits |
+| --- | --- | --- |
+| North | 10 | 20 |
+| East | 1,234.5 | 7 |
+
+**Chart 2** (line)
+
+|  | Series 1 |
+| --- | --- |
+| Q1 | 1 |
+| Q2 | 2 |
+| Q3 | 3 |
+
+**Chart: Picked** (column)
+
+|  | Loans |
+| --- | --- |
+| North | 10 |
+| East | 1,234.5 |
+
+**Chart: External** (column): no saved values
+
+**Chart: One** (pie)
+
+|  | Deposits |
+| --- | --- |
+| North | 20 |
+
+**Chart: Formulas** (column): no saved values
+"""
+
+
+def charts_from_cells_tests():
+    import tempfile
+    sys.path.insert(0, HERE)
+    import make_workbooks as mw
+    path = os.path.join(tempfile.mkdtemp(prefix="cells_"), "charts_from_cells.xlsx")
+    mw.build(path, mw.WORKBOOKS["charts_from_cells"])
+    r = convert(path, charts=True)
+    check("charts from cells: tables after the sheet table", r.markdown.endswith("\n\n" + FROM_CELLS_CHARTS),
+          "\n" + r.markdown)
+    eq("charts from cells: warnings", r.warning, "; ".join([
+        "1 formula cell had no saved value and is blank; open and re-save the file in Excel to fill them",
+        "chart 'Loan mix' on sheet 'Report': values read from its cells",
+        "chart 'Chart 2' on sheet 'Report': values read from its cells",
+        "chart 'Picked' on sheet 'Report': values read from its cells",
+        "chart 'External' on sheet 'Report' has no saved values",
+        "chart 'One' on sheet 'Report': values read from its cells",
+        "chart 'Formulas' on sheet 'Report' has no saved values"]))
+    eq("chart refs: quoted name", sheet2md.chart_ref_areas("'Bob''s data'!$A$1:$A$3"), [("Bob's data", 0, 0, 2, 0)])
+    eq("chart refs: two areas", sheet2md.chart_ref_areas("(Report!$B$2,'Report'!B4)"),
+       [("Report", 1, 1, 1, 1), ("Report", 3, 1, 3, 1)])
+    eq("chart refs: whole column", sheet2md.chart_ref_areas("Data!$B:$B"), [("Data", 0, 1, sheet2md.MAX_ROWS - 1, 1)])
+    for f in ("[1]Other!$A$1", "MyName", "Data!", ""):
+        eq(f"chart refs: unsupported {f!r}", sheet2md.chart_ref_areas(f), None)
+
+
 # ---------------------------------------------------------------- synthetic set vs Firecrawl's output
 def expected_outputs():
     """tests/out/workbooks/*.md is anydoc 0.2.4's output (tests/compare_anydoc.py --save)."""
@@ -550,7 +610,7 @@ def expected_outputs():
 
 
 if __name__ == "__main__":
-    for t in (golden, numfmt, values, header, xlsx, sheets, csv_tests, routing, expected_outputs, charts_tests):
+    for t in (golden, numfmt, values, header, xlsx, sheets, csv_tests, routing, expected_outputs, charts_tests, charts_from_cells_tests):
         try:
             t()
         except Exception as e:  # a crash fails that group, not the run
