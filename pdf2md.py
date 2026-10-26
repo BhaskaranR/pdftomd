@@ -145,6 +145,7 @@ class ImageRef:
     path: Optional[str] = None
     data_uri: Optional[str] = None
     alt: str = ""
+    labels: str = ""          # a saved chart's own text (axis ticks, bar names), as one line
 
 
 @dataclass
@@ -869,6 +870,24 @@ def one_colour_bars(ms, axes, words) -> bool:
         if len(ticks) >= 3:
             return True
     return False
+
+
+CHART_LABEL_MAX_WORDS = 3   # chart labels are short: ticks, bar and series names
+CHART_MIN_TICKS = 3         # and an axis has several plain-number ticks
+
+
+def chart_labels(words) -> str:
+    """A chart's text in reading order, one label per gap-separated segment: "14, 12, …, Alpha".
+    "" when the text doesn't look like chart labels (a shaded table mistaken for a chart keeps
+    its text where it is)."""
+    out = []
+    for ln in group_lines(words, 0):
+        out += [join_words(sg) for sg in segments(ln)]
+    out = [t for t in out if t.strip()]
+    ticks = sum(1 for t in out if re.fullmatch(r"[-−(]?\d[\d,.]*%?\)?", t))
+    if ticks < CHART_MIN_TICKS or any(len(t.split()) > CHART_LABEL_MAX_WORDS for t in out):
+        return ""
+    return ", ".join(out)
 
 
 def vector_figures(page, words, ox, oy) -> list:
@@ -1997,7 +2016,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                 layout = ocr is None          # hybrid (scan + text) pages keep the simple path
                 full = (0.0, 0.0, page.width, page.height)
                 rules = horizontal_rules(page, ox, oy) if layout else []
-                # vector charts: saved as a picture next to their labels (text untouched)
+                # vector charts: saved as a picture; its own labels move into one line under it
                 chart_boxes = [vf["bbox"] for vf in vector_figures(page, words, ox, oy)] if layout else []
                 if images != "none":
                     for n_, fb in enumerate(chart_boxes):
@@ -2006,6 +2025,10 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                               min(fb[2] + ox + 2, px1), min(fb[3] + oy + 2, pbottom))
                         ref = ImageRef(pageno, len(refs) + n_ + 1, ab, alt=f"Chart (page {pageno})")
                         if save_image(page, ref, images, image_dir, stem, image_dpi):
+                            inside = [w for w in words if center_inside((w.x0, w.top, w.x1, w.bottom), fb)]
+                            ref.labels = chart_labels(inside)
+                            if ref.labels:              # chart-like text only; else it stays put
+                                words = [w for w in words if w not in inside]
                             all_images.append(ref)
                             items.append(Line(pageno, [], fb[0], fb[2], fb[1], fb[3], "image", ref))
                 # side-by-side blocks: split the page into regions, read each on its own
@@ -2067,12 +2090,13 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
 
         def image_md(ref):
             alt = ref.alt or f"Image {ref.index} (page {ref.page})"
+            note = f"\n\n*Chart labels: {ref.labels}*" if ref.labels else ""
             if ref.data_uri:
-                return f"![{alt}]({ref.data_uri})"
+                return f"![{alt}]({ref.data_uri})" + note
             if ref.path:
                 path = os.path.relpath(os.path.abspath(ref.path), link_base) if link_base \
                     else ref.path
-                return f"![{alt}]({path.replace(os.sep, '/')})"
+                return f"![{alt}]({path.replace(os.sep, '/')})" + note
             return ""
 
         # ---- assemble document markdown, per-page markdown and blocks ----

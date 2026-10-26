@@ -397,6 +397,15 @@ def test_column_chart(labels):
     check(f"{pre}: body text kept", "Volumes rose in every quarter" in md and
           "The chart below shows volume" in md)
     check(f"{pre}: markdownSpan exact", spans_ok(r))
+    ri = convert(p, images="embed")
+    labels_line = next((l for l in ri.markdown.splitlines() if l.startswith("*Chart labels:")), "")
+    check(f"{pre}, images on: ticks and categories gathered in one line under the chart",
+          all(x in labels_line for x in ("Q1", "Q4", "0")), labels_line or ri.markdown[:400])
+    check(f"{pre}, images on: legend outside the chart box still in the text",
+          all(x in ri.markdown for x in ("Desk A", "Desk B")), ri.markdown[:400])
+    check(f"{pre}, images on: body text outside the chart kept",
+          "Volumes rose in every quarter" in ri.markdown and "The chart below shows volume" in ri.markdown)
+    check(f"{pre}, images on: markdownSpan exact", spans_ok(ri))
 
 
 def test_pie():
@@ -557,9 +566,38 @@ def test_demo_single_colour_chart():
     check("demo p3: one-colour vector bar chart saved as a figure", len(figs) == 1, figs)
     ok, where = in_order(md, ["Figure 3: Fund assets", "](", "Returns are net of fees"])
     check("demo p3: chart image after its title, before the footnote", ok, where)
-    check("demo p3: chart labels stay in the text", all(x in md for x in ("Alpha", "Delta")), md[-400:])
+    check("demo p3: chart labels in one line under the image",
+          "*Chart labels: 14, 12, 10, 8, 6, 4, 2, 0, Alpha, Beta, Gamma, Delta*" in md, md[-500:])
+    check("demo p3: no loose axis-number lines", not re.search(r"^(14|12|10|8|6|4|2)$", md, re.M), md[-500:])
+    check("demo p3: footnote after the chart kept", in_order(md, ["*Chart labels:", "Returns are net of fees"])[0])
+    plain = run(os.path.join(OUT, "layout_demo.pdf")).markdown
+    check("demo p3, images off: chart text stays as text (no picture to replace it)",
+          "Alpha" in plain and "*Chart labels:" not in plain)
     check("demo p3: both side-by-side tables still tables",
           "| Alpha Growth | 12,400 | 8.2% |" in md and "| AAA | 14 | 11.2% |" in md, md[:600])
+
+
+def test_chart_text_fold_only_labels():
+    """Only chart-like text (short labels, numeric ticks) is folded into the labels line; text of a
+    shaded table mistaken for a chart stays as it is."""
+    from pdf2md import Word, chart_labels
+
+    def words(rows):
+        out = []
+        for k, cells in enumerate(rows):
+            for x, t in cells:
+                for j, tok in enumerate(t.split()):
+                    out.append(Word(tok, x + j * 40, x + j * 40 + 36, 100 + 16 * k, 109 + 16 * k, 9.0,
+                                    "Helvetica", False, False, False))
+        return out
+    table = words([[(80, "Area"), (260, "Competence")],
+                   [(80, "1. Embodying sustainability values"), (260, "1.1 Valuing sustainability")],
+                   [(260, "1.2 Supporting fairness")], [(260, "1.3 Promoting nature")]])
+    check("chart text fold: table text mistaken for a chart is not folded", chart_labels(table) == "",
+          chart_labels(table))
+    axis = words([[(40, "14")], [(40, "12")], [(40, "10")], [(40, "0"), (90, "Alpha"), (200, "Beta"), (310, "Gamma")]])
+    check("chart text fold: ticks and short names are folded", chart_labels(axis) == "14, 12, 10, 0, Alpha, Beta, Gamma",
+          chart_labels(axis))
 
 
 def rating_squares(path):
@@ -724,6 +762,7 @@ if __name__ == "__main__":
     test_label_columns_not_split()
     test_demo_single_colour_chart()
     test_rating_squares_not_chart()
+    test_chart_text_fold_only_labels()
     test_mixed_page()
     test_rotated_scans()
     test_scorecard("aligned")

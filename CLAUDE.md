@@ -34,7 +34,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 2. Words → lines (page-relative coordinates via `page.bbox`).
 3. Tables: ruled (`find_tables`, lines strategy) then borderless (text alignment).
 4. Vector charts detected (filled shapes) and saved as images only — never converted to numbers (tried;
-   too unreliable across layouts). Side-by-side blocks split into regions (rules that stop at a gutter,
+   too unreliable across layouts). With images on, a chart's own text (numeric ticks + short labels) moves into one
+   `*Chart labels: …*` line under the image; text that doesn't look like chart labels stays where it is. Side-by-side blocks split into regions (rules that stop at a gutter,
    rule heights mostly different on each side, both sides text) and read separately; two-column reading
    order; repeated headers/footers and page numbers stripped.
 5. Body size + heading tiers (H1–H4), then typed blocks: paragraphs, lists, code, tables, figures, captions.
