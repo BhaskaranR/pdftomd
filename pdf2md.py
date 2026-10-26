@@ -2331,6 +2331,7 @@ Output only the Markdown."""
 # A number in the model's answer must match the page in value, sign and row.
 
 NUM_RE = re.compile(r"(~\s*)?(\(\s*)?([-−]\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)(\s*\))?")
+WORD_RE = re.compile(r"[^\W\d_]{2,}")
 GROUPED_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 ISSUES = (("unverified", "NOT FOUND in page text"), ("sign", "SIGN DIFFERS from page text"),
           ("wrong_row", "IN ANOTHER ROW"), ("row_unconfirmed", "ROW NOT CONFIRMED"))
@@ -2372,14 +2373,21 @@ def _keys(text) -> set:
     return out
 
 
+ROW_CELL_MAX_WORDS = 3      # a data row's value cells are short; longer cells are prose
+
+
 def _row_labels(answer) -> list:
-    """[(start, end, label)] for answer table rows whose first cell is text."""
+    """[(start, end, label)] for answer data rows: first cell is text, value cells are short.
+    Rows with prose cells (an equipment list) get no row check: their label words recur
+    all over the page."""
     out, pos = [], 0
     for line in answer.splitlines(keepends=True):
         st = line.strip()
         if st.startswith("|") and not re.fullmatch(r"[|\-:\s]+", st):
-            lab = st.strip("|").split("|")[0].strip()
-            if len(lab) >= 2 and not number_tokens(lab):
+            cells = [c.strip() for c in st.strip("|").split("|")]
+            lab = cells[0]
+            if len(lab) >= 2 and not number_tokens(lab) and \
+                    all(len(WORD_RE.findall(c)) <= ROW_CELL_MAX_WORDS for c in cells[1:]):
                 out.append((pos, pos + len(line), lab))
         pos += len(line)
     return out
@@ -2547,9 +2555,8 @@ def prepare(src, work, mode="auto", page_range=None, max_pages=None, password=No
 # ---- merge ----
 
 TABLE_BLOCK_RE = re.compile(r"(?:^\|.*\|[ \t]*(?:\n|$))+", re.M)
-WORD_RE = re.compile(r"[^\W\d_]{2,}")
 # Provisional limits for a whole-page (layout) answer against the page's text layer: (at least,
-# share of the page's words). Set from the evaluation on real pages (tasks/hard-pages.md, D).
+# share of the page's words). Set from the evaluation on 10 real pages (tasks/hard-pages.md, D).
 LAYOUT_MAX_NEW_WORDS = (2, 0.005)      # answer words that are not on the page
 LAYOUT_MAX_MISSING_WORDS = (3, 0.01)   # page words left out of the answer
 LAYOUT_MAX_NEW_PAIRS = (3, 0.01)       # answer word pairs found neither in our draft nor on a page line
@@ -2568,15 +2575,32 @@ def word_check(answer, native, ours):
     page = Counter(_words(native))
     n = max(sum(page.values()), 1)
     left = page.copy()
-    new = []
-    for w in _words(answer):
+    split = defaultdict(list)            # text-layer quirk: one word in two pieces ("do cument")
+    for line in native.splitlines():
+        ws = _words(line)
+        for a, b in _pairs(ws):
+            split[a + b].append((a, b))
+    new, ws, i = [], _words(answer), 0
+    while i < len(ws):
+        w = ws[i]
+        joined = w + ws[i + 1] if i + 1 < len(ws) else None
         if left[w]:
             left[w] -= 1
+        elif joined and left[joined]:        # the other quirk: two words run together ("eachform")
+            left[joined] -= 1
+            i += 1
+        elif any(left[a] and left[b] for a, b in split.get(w, ())):
+            a, b = next((a, b) for a, b in split[w] if left[a] and left[b])
+            left[a] -= 1
+            left[b] -= 1
         else:
             new.append(w)
+        i += 1
     missing = sum(left.values())
     known = set(_pairs(_words(ours))) | {p for line in native.splitlines() for p in _pairs(_words(line))}
-    new_pairs = {p for p in _pairs(_words(answer)) if p not in known}
+    prose = [line for line in answer.splitlines() if not line.lstrip().startswith("|")]
+    new_pairs = {p for line in prose for p in _pairs(_words(line)) if p not in known}   # tables: cells
+    # wrap and the page's lines mix columns, so word order is only checked in prose
     limit = lambda rule: max(rule[0], rule[1] * n)
     problems = []
     if len(new) > limit(LAYOUT_MAX_NEW_WORDS):

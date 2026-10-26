@@ -129,6 +129,10 @@ def test_sign_and_position():
     check("nested labels share their line", not any(iss.values()), iss)
     _, iss, _ = pv.check_answer("| Alpha | 34.8 |", "Alpha Beta\n34.8 28.3")
     check("values on the line below their label", not any(iss.values()), iss)
+    # long prose cells (a price list's equipment column) are not data rows: no row check there
+    _, iss, _ = pv.check_answer("| Exclusive | Hi-pass 1 |\n| Prestige | Digital key 2 and Vision roof |",
+                                "Exclusive Hi-pass 1 Digital key 2\nPrestige Vision roof")
+    check("prose cells: no row check", not iss["wrong_row"], iss)
 
 
 def test_requires_tesseract():
@@ -410,6 +414,39 @@ def test_hard_pages_merge():
             check(f"layout, {name}: reason given", why in pv.summary([e]), pv.summary([e]))
 
 
+def test_word_check_tables():
+    """A whole-page answer with a table: words wrap inside cells and the page's text lines mix the
+    columns, so word pairs across cells or wrapped lines are not evidence of rewording."""
+    native = ("Stage Function Explanation\n"
+              "Project creation Project creation and Select document type to automatically run\n"
+              "management project creation, Pipeline configuration with\n"
+              "recommended Modelset and Endpoint deployment\n"
+              "Data labeling and Data storage Provides convenient functions for uploading\n"
+              "fine-tuning management raw data, viewer, and data management\n"
+              "Monitoring Full Pack Monitoring traffic of all deployed Endpoints,\n"
+              "Monitoring and monitoring of resources connected to the Pack")
+    answer = ("| Stage | Function | Explanation |\n|---|---|---|\n"
+              "| Project creation | Project creation and management | Select document type to automatically run "
+              "project creation, Pipeline configuration with recommended Modelset and Endpoint deployment |\n"
+              "| Data labeling and fine-tuning | Data storage management | Provides convenient functions for "
+              "uploading raw data, viewer, and data management |\n"
+              "| Monitoring | Full Pack Monitoring | Monitoring traffic of all deployed Endpoints, and monitoring "
+              "of resources connected to the Pack |")
+    check("word check: faithful table on a column-mixed page passes", pv.word_check(answer, native, "") == [],
+          pv.word_check(answer, native, ""))
+    # text-layer quirks (a word split by a stray mark, logo text that is a picture): 3 such words on a
+    # ~400-word page are not rewording (seen on real pages in tasks/hard-pages.md, evaluation D)
+    prose = " ".join(f"Paragraph {i} covers the desk plan and the review." for i in range(40))
+    quirky_native = prose.replace("covers", "co vers", 1).replace("review", "re view", 1) \
+                         .replace("desk plan", "deskplan", 1)
+    quirky_answer = prose + " upstage"
+    check("word check: 3 text-layer quirks on a 400-word page pass",
+          pv.word_check(quirky_answer, quirky_native, "") == [], pv.word_check(quirky_answer, quirky_native, ""))
+    reworded = answer.replace("Select document type to automatically run project creation",
+                              "Project creation runs automatically for the document type")
+    check("word check: reworded cell still caught", pv.word_check(reworded, native, "") != [])
+
+
 def test_missing_answer():
     with tempfile.TemporaryDirectory() as tmp:
         pdf = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
@@ -439,6 +476,7 @@ def test_cli():
 if __name__ == "__main__":
     test_numbers()
     test_sign_and_position()
+    test_word_check_tables()
     test_requires_tesseract()
     if HAVE_OCR:
         test_vector_chart()
