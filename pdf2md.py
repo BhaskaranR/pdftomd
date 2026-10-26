@@ -2146,6 +2146,84 @@ def _parser_opts(parsers):
     return pdf_opts, image_on
 
 
+def attachment_reader(pdf_opts, image_on, images="embed", image_dir=None, link_base=None, ocr_lang="eng",
+                      image_dpi=150, password=None, include_hidden=False, charts=False):
+    """read_attachment for msg2md: PDFs (the pdf parser's options), pictures (OCR, with the image
+    parser on) and workbooks (sheet2md). -> (markdown | None, problem | None, warnings);
+    None, None = listed only."""
+    import sheet2md
+    used = set()
+
+    def picture(att):
+        from PIL import Image
+        try:
+            img = Image.open(io.BytesIO(att.data))
+            img.load()
+        except Exception:  # noqa: BLE001 - not a picture Pillow can read
+            return None, "not a readable picture", []
+        alt = re.sub(r"[\[\]\n]", " ", att.name)
+        link = ""
+        if images == "embed":
+            buf = io.BytesIO()
+            (img if img.mode in ("RGB", "L") else img.convert("RGB")).save(buf, "PNG", optimize=True)
+            link = f"![{alt}](data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()})"
+        elif images == "save" and image_dir:
+            os.makedirs(image_dir, exist_ok=True)
+            stem, ext = os.path.splitext(re.sub(r"[^\w.\-]+", "_", att.name).strip(".") or "picture")
+            fname, k = stem + ext, 1
+            while fname in used:
+                k += 1
+                fname = f"{stem}_{k}{ext}"
+            used.add(fname)
+            path = os.path.join(image_dir, fname)
+            with open(path, "wb") as f:
+                f.write(att.data)
+            rel = os.path.relpath(os.path.abspath(path), link_base) if link_base else path
+            link = f"![{alt}]({rel.replace(os.sep, '/')})"
+        warns = []
+        paras = ocr_image(flatten_alpha(img), ocr_lang) if ocr_available() else None
+        if paras is None:
+            warns.append("picture needs OCR but Tesseract is not available; install tesseract-ocr and pytesseract")
+            paras = []
+        return "\n\n".join([link] * bool(link) + [p["text"] for p in paras]), None, warns
+
+    def read(att, depth):
+        data = att.data
+        if data is None:
+            return None, "the file is not stored in the email (a link or a reference)", []
+        if is_pdf_buffer(data):
+            if pdf_opts is None:
+                return None, None, []
+            try:
+                r = convert(data, mode=pdf_opts.get("mode", "auto"), max_pages=pdf_opts.get("maxPages"),
+                            page_markers=pdf_opts.get("pageMarkers", False),
+                            images=pdf_opts.get("images", images), image_dir=image_dir, link_base=link_base,
+                            ocr_lang=ocr_lang, image_dpi=image_dpi, password=password, name=att.name)
+            except PDFOCRRequiredError as e:
+                return None, str(e), []
+            except Exception as e:  # noqa: BLE001 - pdfminer wraps password / damage errors
+                if "PDFPasswordIncorrect" in repr(e) + " " + repr(getattr(e, "__cause__", "")):
+                    return None, "the password did not open it" if password else "password-protected", []
+                return None, "damaged or not a readable PDF", []
+            return r.markdown, None, list(r.warnings)
+        ext = sheet2md.spreadsheet_ext(att.name, att.mime, data)
+        if ext:
+            try:
+                r = sheet2md.convert(data, include_hidden=include_hidden, ext=ext, charts=charts)
+            except sheet2md.SheetError as e:
+                if e.code == "SPREADSHEET_UNSUPPORTED":
+                    return None, None, []                         # old .xls: listed only
+                return None, str(e), []
+            return r.markdown, None, [r.warning] if r.warning else []
+        is_pic = (att.mime or "").lower().startswith("image/") or os.path.splitext(att.name.lower())[1] in (
+            ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".jp2", ".avif")
+        if is_pic:
+            return picture(att) if image_on else (None, None, [])
+        return None, None, []
+
+    return read
+
+
 def scrape(url, formats=("markdown",), parsers=None, password=None,
            images: Optional[str] = None, image_dir: Optional[str] = None,
            link_base: Optional[str] = None, ocr_lang: str = "eng",
@@ -2165,6 +2243,9 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     as a table (not in Firecrawl); filename names a bytes source.
     chunk: True or {"maxChars": N} adds `data.chunks`, the document cut into pieces for
     embeddings by chunk2md.py (not in Firecrawl).
+    Emails (Outlook .msg, .eml; not in Firecrawl) are converted by msg2md with their attachments:
+    PDFs with the pdf parser's options and password, pictures with the image parser, workbooks
+    with include_hidden / charts; pages and blocks are not returned for emails.
     """
     if images is None:
         images = "save" if image_dir else "embed"
@@ -2188,12 +2269,31 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
         return {"success": True, "data": {"markdown": base64.b64encode(data).decode(),
                                           "metadata": meta}}
 
-    sheet_ext = None
+    sheet_ext = mail_ext = None
     if not is_pdf:
         import sheet2md
         sheet_ext = sheet2md.spreadsheet_ext(url if is_url else name, ctype, data)
+        if not sheet_ext:
+            import msg2md
+            mail_ext = msg2md.email_ext(url if is_url else name, ctype, data)
 
-    if sheet_ext:
+    if mail_ext:
+        if parsers is not None and not parsers:
+            return raw()
+        read = attachment_reader(pdf_opts, image_on, images=images, image_dir=image_dir, link_base=link_base,
+                                 ocr_lang=ocr_lang, image_dpi=image_dpi, password=password,
+                                 include_hidden=include_hidden, charts=charts)
+        r = msg2md.convert(data, read_attachment=read, ext=mail_ext)
+        if r.warning:
+            warnings.append(r.warning)
+        if pdf_opts and (pdf_opts.get("pages") or pdf_opts.get("blocks")):
+            warnings.append("pages and blocks are not returned for emails")
+        meta.update(r.metadata)
+        out = {"metadata": meta}
+        if "markdown" in formats:
+            out["markdown"] = r.markdown
+        chunk_src = r
+    elif sheet_ext:
         if parsers is not None and not parsers:
             return raw()
         r = sheet2md.convert(data, include_hidden=include_hidden, ext=sheet_ext, charts=charts)
@@ -2640,7 +2740,8 @@ def main(argv=None):
                "  pdf2md.py merge <work> -o out.md\n"
                "  see: pdf2md.py prepare --help, pdf2md.py merge --help",
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("input", help="PDF, image or spreadsheet (xlsx, xlsm, csv): path or http(s) URL")
+    ap.add_argument("input", help="PDF, image, spreadsheet (xlsx, xlsm, csv) or email (Outlook .msg, .eml) "
+                                  "with its attachments: path or http(s) URL")
     ap.add_argument("-o", "--output", help="output file (default: stdout)")
     ap.add_argument("--mode", choices=["fast", "auto", "ocr"], default="auto",
                     help="fast: embedded text only; auto: OCR pages with no text (default); "
@@ -2723,6 +2824,10 @@ def main(argv=None):
         print(f"warning: {d['warning']}", file=sys.stderr)
     if a.info or a.output:
         m = d.get("metadata", {})
+        if m.get("contentType") in ("application/vnd.ms-outlook", "message/rfc822"):
+            atts = m.get("attachments", [])
+            print(f"type=email attachments={len(atts)} read={sum(1 for x in atts if x['read'])}", file=sys.stderr)
+            return
         if "contentType" in m:
             print(f"type=spreadsheet sheets={m.get('numSheets', 1)}", file=sys.stderr)
             return

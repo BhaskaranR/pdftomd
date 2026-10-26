@@ -19,6 +19,11 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   libraries. `scrape(chunk=…)` / `--chunks` load it lazily. Tests: `tests/test_chunk.py`.
 - `sheet2md.py` — spreadsheets: zip+XML reader (stdlib only), number formats, header-row guess, GFM tables, CSV,
   opt-in chart tables. `convert()`, CLI. Tests: `tests/test_sheet.py`.
+- `msg2md.py` — emails (.msg, .eml): compound-file reader (port of the MIT `cfb` crate's read side), MAPI properties,
+  HTML → markdown (port of firecrawl/html-to-markdown + GFM/robust-code plugins), RTF (compressed RTF, HTML wrapped in
+  RTF, words/paragraphs/rows of other RTF), `.eml` via stdlib `email`. Stdlib only. Attachments are read by
+  `pdf2md.attachment_reader` (PDF/picture/workbook). Tests: `tests/test_mail.py`; samples from `tests/make_mail.py`;
+  `tests/html2md/` = html-to-markdown's own expected outputs.
 - `tests/make_workbooks.py` — synthetic workbooks + CSVs; `tests/out/workbooks/*.md` = anydoc's output for them.
   `tests/anyref/` builds anydoc locally; `tests/compare_anydoc.py [--save] [files]` diffs sheet2md against it.
 - `verify_transcription.py` + `fingerprints.txt` / `fingerprints_2col.txt` (pdf2md.py), `fingerprints_sheet.txt`
@@ -53,6 +58,12 @@ default: chart caches → tables; no cache → the cells its c:f points at, hidd
 plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). PDF options ignored;
 `parsers: []` → base64 in `markdown`. Errors carry `code`: `SPREADSHEET_TOO_LARGE|ENCRYPTED|UNSUPPORTED|UNREADABLE`.
 
+Emails (not in Firecrawl): found by name/URL → Content-Type → bytes, after spreadsheets (a .msg is a compound file
+like .xls). One document: `# subject`, From/To/Cc/Bcc/Date (UTC)/Attachments lines, message text (HTML headings +1; layout tables unwrapped and tracking pixels dropped, emails only — `html_to_markdown(email=True)`),
+`## Attachment: <name>` sections (headings +2). PDF options + password apply to attached PDFs; pages/blocks not
+returned (warning); `parsers: []` → base64. Pictures under 10 KB skipped. Attached emails 3 levels deep.
+Errors: `EMAIL_UNREADABLE|EMAIL_UNSUPPORTED`.
+
 ## Rules when changing code
 - Run before committing:
   - `python tests/test_layout.py` and `python tests/test_contract.py` (must print all passed)
@@ -62,11 +73,13 @@ plotVisOnly=0, warning says so; default output must stay byte-equal to anydoc). 
   - check that every block's `markdownSpan` slices to its `content` (`--blocks` JSON).
   - `python tests/test_sheet.py` (must print all passed)
   - `python tests/test_chunk.py` (must print all passed)
+  - `python tests/test_mail.py` (must print all passed)
 - Any code change invalidates the fingerprints: regenerate with
   `python verify_transcription.py pdf2md.py > fingerprints.txt` and rebuild `fingerprints_2col.txt`
   (first half left, second half right, left column padded to its widest entry + 2);
-  `python verify_transcription.py sheet2md.py > fingerprints_sheet.txt`.
-  `python verify_transcription.py chunk2md.py > fingerprints_chunk.txt`.
+  `python verify_transcription.py sheet2md.py > fingerprints_sheet.txt`;
+  `python verify_transcription.py chunk2md.py > fingerprints_chunk.txt`;
+  `python verify_transcription.py msg2md.py > fingerprints_msg.txt`.
 - Don't change thresholds without a test that shows the improvement.
 
 ## Decisions

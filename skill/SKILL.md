@@ -1,6 +1,6 @@
 ---
 name: pdf-to-markdown
-description: Convert a PDF to Markdown, including tables, scanned pages, and chart data. Also converts Excel and CSV spreadsheets (xlsx, xlsm, csv) to Markdown tables.
+description: Convert a PDF to Markdown, including tables, scanned pages, and chart data. Also converts Excel and CSV spreadsheets (xlsx, xlsm, csv) to Markdown tables, and Outlook emails (.msg, .eml) with their PDF, picture and spreadsheet attachments.
 ---
 
 # PDF to Markdown
@@ -78,3 +78,19 @@ Hidden sheets, rows and columns are left out; add `--include-hidden` to keep the
 Add `--charts` to also print each Excel chart's saved numbers as a table under its sheet.
 Report to the user any `warning:` line it prints (for example, formula cells that had no
 saved value and came out blank) and any `error:` line, word for word.
+
+## Emails (Outlook .msg, .eml)
+
+No image step; `scripts/pdf2md.py` hands the file to `scripts/msg2md.py` next to it and reads the
+attachments itself. Run:
+
+```
+python scripts/pdf2md.py <input.msg> -o <output.md>
+```
+
+Add `--password <password>` if attached PDFs are password-protected. The output starts with the
+subject, From/To/Cc/Date and the list of attachments, then the message text, then one
+`## Attachment: <name>` section per attachment that was read. PDFs, pictures, spreadsheets and attached
+emails are read; other files are only listed by name.
+Report to the user every attachment whose section says `Could not be read`, and any `warning:`
+or `error:` line, word for word. Do not say an attachment was read when its section says otherwise.

@@ -109,7 +109,8 @@ dd4c64f8 UnsupportedFileError
 16384e3e PDF_OPTIONS
 f3d66931 _pdf_options
 52941aa0 _parser_opts
-61d929a7 scrape
+9bede8fc attachment_reader
+4beda7a3 scrape
 f02a1535 VISION_DOC
 12634071 MIN_PICTURE_PT
 52ffc8dd SCAN_DPI
@@ -138,4 +139,4 @@ c784404e _ocr_text
 b7686859 summary
 b8b7de89 vision_main
 edacb556 error_text
-cf2b1cea main
+953b741c main
