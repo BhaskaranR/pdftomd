@@ -288,6 +288,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["--verify"]:
         sys.exit(verify())
+    if argv[:1] == ["--refresh"]:
+        sys.exit(refresh())
     ap = argparse.ArgumentParser(description="Cut a markdown file into chunks for embeddings (JSON).")
     ap.add_argument("src", help="markdown file, or - for stdin")
     ap.add_argument("--chunk-size", type=int, default=CHUNK_MAX_CHARS, metavar="N",
@@ -304,7 +306,7 @@ def main(argv=None):
 # ---- transcription check -----------------------------------------------------------------------
 # After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
 # function and constant with the fingerprints below; whitespace and comments don't count, any change
-# to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
+# to code, numbers or text in strings does. After a code change: `python3 <this file> --refresh`.
 
 def _fingerprints(src):
     """['<8 hex> <name>'] for each top-level function, class and constant, in file order."""
@@ -362,6 +364,21 @@ def verify(path=None):
     return 0
 
 
+def refresh(path=None):
+    """Rewrite FINGERPRINTS (below) from this file's current code. Return 0."""
+    import os
+    import re as _re
+    path = path or __file__
+    src = open(path, encoding="ascii").read()
+    listing = "\n".join(_fingerprints(src))
+    new = _re.sub(r'^FINGERPRINTS = """\n.*?"""', lambda _: 'FINGERPRINTS = """\n' + listing + '\n"""', src,
+                  count=1, flags=_re.M | _re.S)
+    if new != src:
+        open(path, "w", encoding="ascii").write(new)
+    print(f"{os.path.basename(path)}: fingerprint list {'updated' if new != src else 'already current'}")
+    return 0
+
+
 FINGERPRINTS = """
 9259cd33 CHUNK_MAX_CHARS
 a266394f CHUNK_MIN_CHARS
@@ -379,9 +396,10 @@ d091b840 _split_table
 da623149 _chunk_text
 13ffa77a chunk_markdown
 e4aecbbf chunk
-915dcf73 main
+1bf6d0b1 main
 a3f20c3b _fingerprints
 cc642faa verify
+b3a8ba0f refresh
 """
 
 

@@ -59,19 +59,59 @@ def test_verify():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def run(path, flag):
+    r = subprocess.run([sys.executable, path, flag], capture_output=True, text=True, cwd=os.path.dirname(path))
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
 def test_fingerprints_current():
-    """The list inside each file must match its code: run `python3 make_handover.py --refresh` after a change."""
-    sys.path.insert(0, ROOT)
-    import make_handover
+    """The list inside each file must match its code: run `python3 <file> --refresh` after a change."""
+    tmp = tempfile.mkdtemp(prefix="handover_refresh_")
     for name in CODE:
-        path = os.path.join(ROOT, name)
-        check(f"{name}: built-in fingerprint list is current (else: python3 make_handover.py --refresh)",
-              make_handover.embedded(path) == make_handover.fingerprints(open(path, encoding="ascii").read()))
+        shutil.copy(os.path.join(ROOT, name), tmp)
+    for name in CODE:
+        path = os.path.join(tmp, name)
+        before = open(path, encoding="ascii").read()
+        code, out = run(path, "--refresh")
+        check(f"{name}: built-in fingerprint list is current (else: python3 {name} --refresh)",
+              code == 0 and open(path, encoding="ascii").read() == before, out)
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_refresh_after_change():
+    tmp = tempfile.mkdtemp(prefix="handover_change_")
+    for name in CODE:
+        shutil.copy(os.path.join(ROOT, name), tmp)
+    for name in CODE:
+        path = os.path.join(tmp, name)
+        src = open(path, encoding="ascii").read()
+        m = re.search(r"^def (\w+)\(.*?\n(?:    .*\n)*?    .*?(\b\d+\b)", src, re.M)
+        open(path, "w", encoding="ascii").write(src[:m.start(2)] + str(int(m.group(2)) + 1) + src[m.end(2):])
+        code1, _ = run(path, "--verify")
+        code2, out2 = run(path, "--refresh")
+        code3, out3 = run(path, "--verify")
+        check(f"{name}: after a code change --verify fails, --refresh updates the list, then --verify passes",
+              code1 == 1 and code2 == 0 and code3 == 0, (out2, out3))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_sections_identical():
+    """The check section is the same text in every file (there's no separate tool holding it)."""
+    secs = []
+    for name in CODE:
+        src = open(os.path.join(ROOT, name), encoding="ascii").read()
+        a = src.find("# ---- transcription check ")
+        b = src.find('FINGERPRINTS = """', a)
+        secs.append(src[a:b] if a >= 0 and b > a else None)
+    check("check section present and identical in all three files", secs[0] and len(set(secs)) == 1,
+          [len(x or "") for x in secs])
 
 
 if __name__ == "__main__":
     test_ascii()
     test_verify()
     test_fingerprints_current()
+    test_refresh_after_change()
+    test_sections_identical()
     print("all passed" if not fails else f"{fails} FAILED")
     sys.exit(1 if fails else 0)

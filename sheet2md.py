@@ -2148,6 +2148,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["--verify"]:
         return verify()
+    if argv[:1] == ["--refresh"]:
+        return refresh()
     ap = argparse.ArgumentParser(description="Spreadsheet (xlsx, xlsm, csv) -> Markdown, like Firecrawl.")
     ap.add_argument("src")
     ap.add_argument("-o", "--output")
@@ -2172,7 +2174,7 @@ def main(argv=None):
 # ---- transcription check -----------------------------------------------------------------------
 # After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
 # function and constant with the fingerprints below; whitespace and comments don't count, any change
-# to code, numbers or text in strings does. After a code change: `python3 make_handover.py --refresh`.
+# to code, numbers or text in strings does. After a code change: `python3 <this file> --refresh`.
 
 def _fingerprints(src):
     """['<8 hex> <name>'] for each top-level function, class and constant, in file order."""
@@ -2227,6 +2229,21 @@ def verify(path=None):
         print(f"{name}: {len(differ)} differ: " + ", ".join(dict.fromkeys(differ)))
         return 1
     print(f"{name}: all {len(want)} functions and constants match")
+    return 0
+
+
+def refresh(path=None):
+    """Rewrite FINGERPRINTS (below) from this file's current code. Return 0."""
+    import os
+    import re as _re
+    path = path or __file__
+    src = open(path, encoding="ascii").read()
+    listing = "\n".join(_fingerprints(src))
+    new = _re.sub(r'^FINGERPRINTS = """\n.*?"""', lambda _: 'FINGERPRINTS = """\n' + listing + '\n"""', src,
+                  count=1, flags=_re.M | _re.S)
+    if new != src:
+        open(path, "w", encoding="ascii").write(new)
+    print(f"{os.path.basename(path)}: fingerprint list {'updated' if new != src else 'already current'}")
     return 0
 
 
@@ -2351,9 +2368,10 @@ b3a6c4c2 _records
 e18150b5 EXT_OF
 a3072d18 spreadsheet_ext
 b4a4aa52 convert
-0cfd8f6a main
+3eb5f418 main
 a3f20c3b _fingerprints
 cc642faa verify
+b3a8ba0f refresh
 """
 
 
