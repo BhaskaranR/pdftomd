@@ -1170,9 +1170,10 @@ def find_gutter(lines, x0, x1=None) -> Optional[float]:
     if len(text_lines) < 8:
         return None
     best, best_score = None, 0
+    n = len(text_lines)
     x = x0 + (x1 - x0) * 0.3
     while x <= x0 + (x1 - x0) * 0.7:
-        both = cross = 0
+        both = cross = one_side = 0
         for ln in text_lines:
             if any(w.x0 < x < w.x1 for w in ln.words):
                 cross += 1
@@ -1182,9 +1183,14 @@ def find_gutter(lines, x0, x1=None) -> Optional[float]:
                 right = min(w.x0 for w in ln.words if w.x0 >= x)
                 if right - left >= 8:
                     both += 1
+            else:
+                one_side += 1            # beside a picture or table in the other column
         score = both - 3 * cross
-        if both >= max(5, 0.35 * len(text_lines)) and cross <= 0.15 * len(text_lines) \
-                and score > best_score:
+        # columns: many lines with text on both sides, almost none crossing; lines with text on one
+        # side only (next to a block in the other column) are consistent with that, not against it
+        if cross <= 0.15 * n and score > best_score and (
+                both >= max(5, 0.35 * n) or
+                (both >= max(5, 0.2 * n) and both + one_side >= 0.8 * n)):
             best, best_score = x, score
         x += 2
     return best

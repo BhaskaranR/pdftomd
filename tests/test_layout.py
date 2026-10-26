@@ -505,6 +505,62 @@ def test_mixed_page():
     check(f"{pre}: markdownSpan exact", spans_ok(r) and spans_ok(ri))
 
 
+def demo_pages():
+    """tests/make_demo.py's 4-page PDF, converted once: per-page markdown (images saved)."""
+    if not hasattr(demo_pages, "cache"):
+        from make_demo import build
+        pdf = build(os.path.join(OUT, "layout_demo.pdf"), os.path.join(OUT, "demo_tmp"))
+        r = convert(pdf, images="save", image_dir=os.path.join(OUT, "demo_images"))
+        demo_pages.cache = ({p["pageNumber"]: p["markdown"] for p in r.pages}, r)
+    return demo_pages.cache
+
+
+def in_order(md, needles):
+    pos = [md.find(n) for n in needles]
+    return all(p >= 0 for p in pos) and pos == sorted(pos), dict(zip(needles, pos))
+
+
+def test_demo_two_columns():
+    pages, r = demo_pages()
+    md = pages[2]
+    ok, where = in_order(md, [f"Column paragraph {i}." for i in range(1, 13)])
+    check("demo p2: left column read before right column", ok, where)
+    ok, where = in_order(md, ["Column paragraph 5.", "| North | 214 | 12 |", "Column paragraph 6."])
+    check("demo p2: table in the left column between its paragraphs", ok, where)
+    ok, where = in_order(md, ["Column paragraph 8.", "](", "Figure 2: The new regional office", "Column paragraph 9."])
+    check("demo p2: photo and caption in the right column between its paragraphs", ok, where)
+    check("demo p2: no paragraph broken across columns",
+          all(md.count(f"Column paragraph {i}.") == 1 for i in range(1, 13)) and "the Column paragraph" not in md, md[:300])
+    check("demo p2: marked as a column page", 2 in r.pages_with_columns, r.pages_with_columns)
+
+
+def single_column_short_lines(path):
+    """One column: a paragraph, a short bulleted list and a key/value list (short lines on the left)."""
+    c = canvas.Canvas(path, pagesize=(W, H))
+    c.setFont("Helvetica", 10)
+    y = H - 72
+    c.drawString(72, y, "Account summary for the period, prepared for the committee meeting in October 2026.")
+    for item in ["- Cash balances", "- Open orders", "- Pending transfers", "- Fees charged", "- Notes"]:
+        y -= 16
+        c.drawString(90, y, item)
+    for k, v in [("Prepared by", "J. Okafor"), ("Reviewed by", "M. Lind"), ("Period", "Q3 2026"),
+                 ("Status", "Final"), ("Pages", "4"), ("Copies", "2"), ("Owner", "Finance")]:
+        y -= 16
+        c.drawString(72, y, k)
+        c.drawString(320, y, v)
+    y -= 24
+    c.drawString(72, y, "The figures above were reconciled against the ledger before the meeting started.")
+    c.save()
+    return path
+
+
+def test_single_column_stays():
+    md = run(single_column_short_lines(os.path.join(OUT, "single_short.pdf"))).markdown
+    ok, where = in_order(md, ["Account summary", "Cash balances", "Notes", "Prepared by", "J. Okafor", "Owner",
+                              "Finance", "The figures above"])
+    check("single column with short lines: read top to bottom", ok, where)
+
+
 def test_rotated_scans():
     import pdf2md as P
     if not P.ocr_available():
@@ -520,6 +576,8 @@ def test_rotated_scans():
 
 
 if __name__ == "__main__":
+    test_demo_two_columns()
+    test_single_column_stays()
     test_mixed_page()
     test_rotated_scans()
     test_scorecard("aligned")

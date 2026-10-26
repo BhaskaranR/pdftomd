@@ -73,5 +73,5 @@ aa26e7d7 flatten_alpha              2107f7fd _split_pages
 e7e65bb9 segment_regions            b7686859 summary
 d6bec067 rule_spans_columns         b5ee0cf8 vision_main
 25954202 region_of                  edacb556 error_text
-f156af47 find_gutter                ff6b540b main
+da2d5a2e find_gutter                ff6b540b main
 05c03f7d split_at

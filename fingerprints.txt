@@ -73,7 +73,7 @@ aa26e7d7 flatten_alpha
 e7e65bb9 segment_regions
 d6bec067 rule_spans_columns
 25954202 region_of
-f156af47 find_gutter
+da2d5a2e find_gutter
 05c03f7d split_at
 72fa1251 reading_order
 c778cfbe set_colw
