@@ -129,6 +129,10 @@ def test_sign_and_position():
     check("nested labels share their line", not any(iss.values()), iss)
     _, iss, _ = pv.check_answer("| Alpha | 34.8 |", "Alpha Beta\n34.8 28.3")
     check("values on the line below their label", not any(iss.values()), iss)
+    # long prose cells (a price list's equipment column) are not data rows: no row check there
+    _, iss, _ = pv.check_answer("| Exclusive | Hi-pass 1 |\n| Prestige | Digital key 2 and Vision roof |",
+                                "Exclusive Hi-pass 1 Digital key 2\nPrestige Vision roof")
+    check("prose cells: no row check", not iss["wrong_row"], iss)
 
 
 def test_requires_tesseract():
@@ -289,6 +293,160 @@ def test_blank_page():
         check("text/blank/scan: page 1 kept", "Page one text" in md, md[:200])
 
 
+def hard_pages_pdf(path):
+    """page 1: one column with a ruled table; page 2: two text columns; page 3: plain prose."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import (BaseDocTemplate, Frame, NextPageTemplate, PageBreak, PageTemplate,
+                                    Paragraph, Table, TableStyle)
+    ss = getSampleStyleSheet()
+    W, H = letter
+    doc = BaseDocTemplate(path, pagesize=letter)
+    one = Frame(72, 72, W - 144, H - 144, id="one")
+    left = Frame(72, 72, (W - 144) / 2 - 12, H - 144, id="l")
+    right = Frame(72 + (W - 144) / 2 + 12, 72, (W - 144) / 2 - 12, H - 144, id="r")
+    doc.addPageTemplates([PageTemplate("one", [one]), PageTemplate("two", [left, right]),
+                          PageTemplate("one2", [one])])
+    body = ("Desk volumes moved with the market over the quarter while costs held flat "
+            "against the plan approved by the committee in the spring review. ")
+    rows = [["Desk", "Q1", "Q2"], ["Rates", "1,250", "(300)"], ["Credit", "980", "1,410"],
+            ["Equities", "2,045", "1,990"]]
+    t = Table(rows)
+    t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, colors.black)]))
+    story = [Paragraph("Quarterly Desk Summary", ss["Heading1"]), Paragraph(body, ss["BodyText"]), t,
+             NextPageTemplate("two"), PageBreak()]
+    story += [Paragraph(f"Column paragraph {i + 1}. " + body * 3, ss["BodyText"]) for i in range(8)]
+    story += [NextPageTemplate("one2"), PageBreak(), Paragraph("Closing note. " + body * 2, ss["BodyText"])]
+    doc.build(story)
+    return path
+
+
+def test_hard_pages_prepare():
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = hard_pages_pdf(os.path.join(tmp, "hard.pdf"))
+        man = pv.prepare(pdf, os.path.join(tmp, "off"))
+        check("hard pages off by default: no tables/layout tasks",
+              not [t for t in man["tasks"] if t["kind"] in ("tables", "layout")], man["tasks"])
+        work = os.path.join(tmp, "w")
+        man = pv.prepare(pdf, work, hard_pages=True)
+        kinds = {t["page"]: t["kind"] for t in man["tasks"]}
+        check("hard pages: page 1 (one column + table) -> tables task", kinds.get(1) == "tables", man["tasks"])
+        check("hard pages: page 2 (two columns) -> layout task", kinds.get(2) == "layout", man["tasks"])
+        check("hard pages: page 3 (plain prose) -> no task", 3 not in kinds, man["tasks"])
+        t1 = next(t for t in man["tasks"] if t["page"] == 1)
+        check("tables task: counts the page's tables", t1.get("tables") == 1, t1)
+        check("tables task: page image saved", os.path.exists(os.path.join(work, t1["image"])), t1["image"])
+        check("tables task: prompt asks for the tables only, with our draft as context",
+              "only the tables" in t1["prompt"] and "Rates" in t1["prompt"], t1["prompt"][:300])
+        check("tables task: checked against the native text", "(300)" in t1["check_text"] and "1,410" in t1["check_text"],
+              t1["check_text"][:300])
+        t2 = next(t for t in man["tasks"] if t["page"] == 2)
+        check("layout task: whole page in reading order", "reading order" in t2["prompt"], t2["prompt"][:200])
+        man = pv.prepare(pdf, os.path.join(tmp, "cap"), hard_pages=True, max_hard_pages=1)
+        check("max_hard_pages=1: one hard task, the first", [t["page"] for t in man["tasks"]
+                                                             if t["kind"] in ("tables", "layout")] == [1], man["tasks"])
+        md, rep = pv.merge(work)
+        check("hard-page task without an answer: rule-based output kept",
+              "| Rates | 1,250 | (300) |" in md and entry(rep, "p1_tables")["status"].startswith("no answer"), rep)
+
+        scan = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
+        man = pv.prepare(scan, os.path.join(tmp, "ws"), hard_pages=True)
+        check("scanned page: only its page task, not a hard-page task too",
+              [t["kind"] for t in man["tasks"]] == ["page"], man["tasks"])
+
+        out = os.path.join(tmp, "wcli")
+        import subprocess
+        r = subprocess.run([sys.executable, os.path.join(os.path.dirname(HERE), "pdf2md.py"), "prepare", pdf, out,
+                            "--hard-pages", "--max-hard-pages", "5"], capture_output=True, text=True)
+        check("cli prepare --hard-pages lists them with a reason",
+              r.returncode == 0 and "p1_tables: tables, page 1" in r.stdout and "1 table" in r.stdout
+              and "p2_layout: layout, page 2" in r.stdout, r.stdout + r.stderr[-300:])
+
+
+GOOD_TABLE = ("| Desk | Q1 | Q2 |\n|:---|---:|---:|\n| Rates | 1,250 | (300) |\n"
+              "| Credit | 980 | 1,410 |\n| Equities | 2,045 | 1,990 |")
+
+
+def test_hard_pages_merge():
+    with tempfile.TemporaryDirectory() as tmp:
+        pdf = hard_pages_pdf(os.path.join(tmp, "hard.pdf"))
+        work = os.path.join(tmp, "w")
+        pv.prepare(pdf, work, hard_pages=True)
+        with open(os.path.join(work, "draft.md")) as fh:
+            ours = pv._split_pages(fh.read())
+
+        def run(tid, answer):
+            write_answer(work, tid, answer)
+            md, rep = pv.merge(work)
+            return md, entry(rep, tid)
+
+        md, e = run("p1_tables", GOOD_TABLE)
+        check("tables: correct answer replaces our table", "|:---|---:|---:|" in md and e["status"] == "merged 1 table", e)
+        check("tables: text around the table kept", "Desk volumes moved" in md and "# Quarterly Desk Summary" in md)
+        check("tables: no warning marks in an accepted table", "⚠" not in md)
+        for name, ans, why in (
+                ("wrong number", GOOD_TABLE.replace("1,250", "1,520"), "NOT FOUND"),
+                ("sign dropped", GOOD_TABLE.replace("(300)", "300"), "SIGN DIFFERS"),
+                ("rows swapped", GOOD_TABLE.replace("| 980 | 1,410 |", "| 2,045 | 1,990 |", 1)
+                 .replace("| Equities | 2,045 | 1,990 |", "| Equities | 980 | 1,410 |"), "IN ANOTHER ROW"),
+                ("two tables for one", GOOD_TABLE + "\n\n| A | B |\n|---|---|\n| x | 1 |", "table count"),
+                ("estimated value", GOOD_TABLE.replace("1,410", "~1,410"), "estimate"),
+                ("no table at all", "The table shows desk volumes.", "table count")):
+            md, e = run("p1_tables", ans)
+            check(f"tables, {name}: ours kept", "|:---|" not in md and "| Rates | 1,250 | (300) |" in md, md[:400])
+            check(f"tables, {name}: reason given", e["status"].startswith("kept rule-based") and why in pv.summary([e]),
+                  pv.summary([e]))
+            check(f"tables, {name}: our table unmarked", "⚠" not in md)
+        write_answer(work, "p1_tables", GOOD_TABLE)
+
+        good = ours[2]
+        md, e = run("p2_layout", good)
+        check("layout: faithful answer replaces the page", e["status"] == "merged page", e)
+        para = "while costs held flat against the plan approved by the committee in the spring review."
+        for name, ans, why in (
+                ("paraphrased sentence", good.replace(para, "and costs stayed flat as planned.", 1), "words"),
+                ("paragraph dropped", "\n\n".join(good.split("\n\n")[1:]), "missing"),
+                ("sentence invented", good + "\n\nRevenue rose sharply after the merger closed.", "words"),
+                ("number changed", good.replace("Column paragraph 3.", "Column paragraph 9."), "NOT FOUND")):
+            md, e = run("p2_layout", ans)
+            check(f"layout, {name}: ours kept", e["status"].startswith("kept rule-based") and good.split("\n\n")[0] in md, e)
+            check(f"layout, {name}: reason given", why in pv.summary([e]), pv.summary([e]))
+
+
+def test_word_check_tables():
+    """A whole-page answer with a table: words wrap inside cells and the page's text lines mix the
+    columns, so word pairs across cells or wrapped lines are not evidence of rewording."""
+    native = ("Stage Function Explanation\n"
+              "Project creation Project creation and Select document type to automatically run\n"
+              "management project creation, Pipeline configuration with\n"
+              "recommended Modelset and Endpoint deployment\n"
+              "Data labeling and Data storage Provides convenient functions for uploading\n"
+              "fine-tuning management raw data, viewer, and data management\n"
+              "Monitoring Full Pack Monitoring traffic of all deployed Endpoints,\n"
+              "Monitoring and monitoring of resources connected to the Pack")
+    answer = ("| Stage | Function | Explanation |\n|---|---|---|\n"
+              "| Project creation | Project creation and management | Select document type to automatically run "
+              "project creation, Pipeline configuration with recommended Modelset and Endpoint deployment |\n"
+              "| Data labeling and fine-tuning | Data storage management | Provides convenient functions for "
+              "uploading raw data, viewer, and data management |\n"
+              "| Monitoring | Full Pack Monitoring | Monitoring traffic of all deployed Endpoints, and monitoring "
+              "of resources connected to the Pack |")
+    check("word check: faithful table on a column-mixed page passes", pv.word_check(answer, native, "") == [],
+          pv.word_check(answer, native, ""))
+    # text-layer quirks (a word split by a stray mark, logo text that is a picture): 3 such words on a
+    # ~400-word page are not rewording (seen on real pages in tasks/hard-pages.md, evaluation D)
+    prose = " ".join(f"Paragraph {i} covers the desk plan and the review." for i in range(40))
+    quirky_native = prose.replace("covers", "co vers", 1).replace("review", "re view", 1) \
+                         .replace("desk plan", "deskplan", 1)
+    quirky_answer = prose + " upstage"
+    check("word check: 3 text-layer quirks on a 400-word page pass",
+          pv.word_check(quirky_answer, quirky_native, "") == [], pv.word_check(quirky_answer, quirky_native, ""))
+    reworded = answer.replace("Select document type to automatically run project creation",
+                              "Project creation runs automatically for the document type")
+    check("word check: reworded cell still caught", pv.word_check(reworded, native, "") != [])
+
+
 def test_missing_answer():
     with tempfile.TemporaryDirectory() as tmp:
         pdf = scanned_table_pdf(os.path.join(tmp, "scan.pdf"))
@@ -318,6 +476,7 @@ def test_cli():
 if __name__ == "__main__":
     test_numbers()
     test_sign_and_position()
+    test_word_check_tables()
     test_requires_tesseract()
     if HAVE_OCR:
         test_vector_chart()
@@ -326,6 +485,8 @@ if __name__ == "__main__":
         test_jpeg_scan_safety_net()
         test_page_markers()
         test_blank_page()
+        test_hard_pages_prepare()
+        test_hard_pages_merge()
         test_missing_answer()
         test_cli()
     else:

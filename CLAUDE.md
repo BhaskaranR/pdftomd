@@ -13,7 +13,8 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   `python make_skill.py` builds the installable folder in `dist/pdf-to-markdown/` from the real files (add new ones to its FILES).
 - `pdf2md.py` — extraction, routing, tables, layout, headings, blocks, OCR, `convert()`, `scrape()`, CLI,
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
-  scanned pages; number check against page text/OCR). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
+  scanned pages; number check against page text/OCR; opt-in `--hard-pages`: text pages with tables/columns, used only
+  if numbers and words match the text layer, else rule-based output kept). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
 - `chunk2md.py` — `chunk()`: the final markdown cut into pieces for embeddings, for every format (reads markdown
   structure; PDF blocks add pages/bboxes via markdownSpan). Stdlib only, so search code can import it without PDF
   libraries. `scrape(chunk=…)` / `--chunks` load it lazily. Tests: `tests/test_chunk.py`.
