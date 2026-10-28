@@ -739,6 +739,225 @@ def test_single_column_stays():
     check("single column with short lines: read top to bottom", ok, where)
 
 
+BP_HEAD = ["Rank", "Rank..", "%To..", "$ YTD", "$ Prev YTD", "$Δ POP", "B/D %Δ POP", "WM %Δ POP"]
+# (labels as printed, rank, change, share, ytd, prev ytd, B/D %, WM %)
+BP_PAGES = [
+    [("Overall Trading Commissions", "", 2, [
+        (["Overall Commissions", ""], 5, -1, 100, 152918094, 136877273, 11, 22),
+        (["Equity", "Subtotal"], 5, -1, 19, 31159326, 25989698, 20, 36),
+        (["", "High Touch"], 5, -1, 15, 23931992, 18323498, 31, 40),
+        (["", "Low Touch"], 5, -2, 4, 7227334, 7666200, -6, 24),
+        (["Fixed Income", "Subtotal"], 5, 0, 81, 121768768, 110887575, 9, 18),
+        (["", "Cash"], 4, -1, 63, 92128437, 83656870, 9, 16),
+        (["", "Derivatives"], 6, -2, 18, 29640331, 27230705, 9, 26)]),
+     ("Equity Regions", "(Excludes supranational and multi-country)", 1, [
+         (["Asia ex Japan"], 2, 0, 12, 3892637, 3074707, 27, 26),
+         (["Canada"], 11, -6, 0, 102261, 252902, -60, 17),
+         (["EMEA"], 4, -1, 27, 8364453, 6305697, 33, 53),
+         (["Japan"], 6, -2, 4, 1250278, 1433449, -13, 39),
+         (["United States"], 5, -1, 53, 16402928, 13923751, 18, 6)]),
+     ("Equity Derivatives", "(Futures aggregated via executing B/D)", 1, [
+         (["Total"], 5, 0, 100, 4989930, 3238731, 54, 79),
+         (["Options"], 5, 0, 98, 4908639, 3222006, 52, 64),
+         (["Swaps"], 5, 2, 2, 81291, 11840, 87, 80)])],
+    [("Fixed Income Sectors", "", 3, [
+        (["Investment Grade", "Subtotal", ""], 4, -1, 24, 31781814, 31329706, 1, 6),
+        (["", "Cash", "New Issue"], 1, 1, 58, 19127501, 20298311, -6, 0),
+        (["", "", "Secondary"], 5, -1, 43, 11033887, 10167886, 9, 22),
+        (["", "Deriv", ""], 4, 3, 1, 509643, 155433, 28, -47),
+        (["High Yield (ex BL)", "Subtotal", ""], 4, -1, 9, 11230921, 12457646, -10, 26),
+        (["", "Cash", "New Issue"], 3, 0, 20, 6530342, 9524806, -31, 15),
+        (["", "", "Secondary"], 4, -1, 13, 3430249, 2260293, 52, 46),
+        (["Municipals", "Subtotal", ""], 2, 0, 1, 1507158, 1397330, 8, -6),
+        (["", "Tax Exempt", ""], 1, 1, 1, 679198, 616801, 10, -5)])],
+    [("", "", 3, [   # the table carries on: the page starts under a group printed on the page before
+        (["", "Taxable", ""], 2, 1, 1, 827960, 780529, 6, -8),
+        (["Structured Finance", "Subtotal", ""], 2, 0, 6, 8309372, 6203253, 34, 26),
+        (["", "Cash", "New Issue"], 4, 0, 9, 2788777, 1712329, 63, 81),
+        (["", "", "Secondary"], 1, 1, 21, 5520595, 4490924, 23, 3)])],
+]
+
+
+def bp_cells(row):
+    """A row's printed cells after the labels."""
+    _, rank, chg, share, ytd, prev, bd, wm = row
+    d = ytd - prev
+    return [str(rank), "%+d" % chg, "%d%%" % share, "{:,}".format(ytd), "{:,}".format(prev),
+            ("+" if d >= 0 else "") + "{:,}".format(d), "%+d%%" % bd, "%+d%%" % wm]
+
+
+def bp_expected():
+    """Tables as they should read: group labels filled in (a lower label only under its own upper label),
+    carried over a page break."""
+    out, last = [], []
+    for page in BP_PAGES:
+        for title, note, nlab, rows in page:
+            if not title:
+                last = last[:nlab]
+            else:
+                last = [""] * nlab
+            table = [[""] * nlab + BP_HEAD]
+            for row in rows:
+                labels, filled, fresh = row[0], [], False
+                for k, lab in enumerate(labels):
+                    fresh = fresh or bool(lab)
+                    filled.append(lab if lab or fresh else last[k])
+                last = filled
+                table.append(filled + bp_cells(row))
+            out.append((title, note, table))
+    return out
+
+
+def broker_profile(path):
+    """Dashboard-export broker profile (invented values): every word drawn on its own with no space characters
+    (the gap is one space, ~0.28 em, at 4.5-6pt), a navy sidebar repeated on every page, stacked tables under
+    grey title bands, up to three levels of group labels, and two bar columns whose % sits under each bar."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    PW, PH = 700, 792
+    c = canvas.Canvas(path, pagesize=(PW, PH))
+    navy, band = colors.HexColor("#1F3A5F"), colors.HexColor("#E6E9EE")
+    green, red = colors.HexColor("#3CB043"), colors.HexColor("#E0403A")
+
+    def words(x, y, s, size=5.5, fnt="Helvetica", right=False, color=colors.black):
+        ws, gap = s.split(), stringWidth(" ", fnt, size)
+        if right:
+            x -= sum(stringWidth(w, fnt, size) for w in ws) + gap * (len(ws) - 1)
+        c.setFillColor(color)
+        for w in ws:
+            c.setFont(fnt, size)
+            c.drawString(x, y, w)
+            x += stringWidth(w, fnt, size) + gap
+        c.setFillColor(colors.black)
+
+    def sidebar():
+        c.setFillColor(navy)
+        c.rect(25, 20, 105, PH - 120, stroke=0, fill=1)
+        white = colors.white
+        y = PH - 130
+        for s, f, z in [("Global", "Helvetica-Bold", 11), ("Broker Profile", "Helvetica-Bold", 11),
+                        ("December 31, 2025", "Helvetica", 7), ("Northwind Securities", "Helvetica", 7)]:
+            words(35, y, s, z, f, color=white)
+            y -= 14
+        y -= 12
+        for yr in ("'25", "'24"):
+            words(30, y, yr, 4.5, color=white)
+            for k, m in enumerate("JFMAMJJASOND"):
+                c.setFillColor(colors.HexColor("#F2A65A"))
+                c.rect(40 + k * 7.5, y - 1.5, 7, 6.5, stroke=0, fill=1)
+                words(41.5 + k * 7.5, y, m, 4.5)
+            y -= 8
+        y -= 14
+        words(32, y, "Filters:", 7, "Helvetica-Bold", color=white)
+        y -= 10
+        words(32, y, "Northwind Securities Ltd", 5, color=white)
+        y -= 20
+        words(32, y, "Definitions:", 7, "Helvetica-Bold", color=white)
+        y -= 12
+        words(32, y, "Period Over Period (POP)", 6, "Helvetica-Bold", color=white)
+        y -= 8
+        for ln in ["Compares the current year,", "through the date listed, to the", "equivalent period from the",
+                   "previous year. This is based", "on actual values not", "annualized estimates."]:
+            words(34, y, ln, 4.8, color=white)
+            y -= 6
+        y -= 6
+        for title, items in [("Low Touch", ["Algorithm (CA)", "VWAP (VW)", "Portfolio Optimization (PO)"]),
+                             ("High Touch", ["Natural (CN)", "Working (CW)", "Block Risk Trade (CT)"])]:
+            words(32, y, title, 6, "Helvetica-Bold", color=white)
+            y -= 7
+            for it in items:
+                words(34, y, "• " + it, 4.8, color=white)
+                y -= 6
+            y -= 6
+
+    X0 = 140
+    cols = [292, 312, 332, 375, 420, 467]           # right edges of the six number columns
+    # label columns; on the 2-level table a long top label runs past the start of the next column
+    labx = {1: [X0 + 2], 2: [X0 + 2, X0 + 50], 3: [X0 + 2, X0 + 60, X0 + 105]}
+    axes = [525, 620]                               # zero line of the two bar columns
+    rowh = 22
+    for page in BP_PAGES:
+        sidebar()
+        y = PH - 105
+        for title, note, nlab, rows in page:
+            if title:
+                c.setFillColor(band)
+                c.rect(X0, y - 4, PW - X0 - 20, 11, stroke=0, fill=1)
+                words(X0 + 2, y, title, 6, "Helvetica-Bold")
+                if note:
+                    words(X0 + 90, y, note, 4.5, "Helvetica-Oblique", color=colors.grey)
+            hy = y - 12
+            for name, x in zip(BP_HEAD[:6], cols):
+                words(x, hy, name, 5, "Helvetica-Bold", right=True)
+            words(axes[0] - 15, hy, BP_HEAD[6], 5, "Helvetica-Bold")
+            words(axes[1] - 15, hy, BP_HEAD[7], 5, "Helvetica-Bold")
+            y = hy - 14
+            for row in rows:
+                for x, lab in zip(labx[nlab], row[0]):
+                    if lab:
+                        words(x, y, lab, 5.5, "Helvetica-Bold" if lab == "Subtotal" else "Helvetica")
+                cells = bp_cells(row)
+                for x, v in zip(cols, cells[:6]):
+                    words(x, y, v, 5.5, right=True)
+                for axis, v, pct in zip(axes, cells[6:], row[6:]):
+                    w = max(min(pct * 0.3, 35), -35)
+                    c.setFillColor(green if pct >= 0 else red)
+                    c.rect(axis, y - 9, w if w else 0.8, rowh - 2, stroke=0, fill=1)
+                    if pct >= 0:
+                        words(axis + w + 1, y - 13, v, 4.5)
+                    else:
+                        words(axis + w - 1, y - 13, v, 4.5, right=True)
+                y -= rowh
+            y -= 10
+        c.showPage()
+    c.save()
+    return path
+
+
+def bp_norm(s):
+    return s.replace("∆", "Δ")             # the Delta glyph's name maps to either code point
+
+
+def test_broker_profile():
+    r = convert(broker_profile(os.path.join(OUT, "broker_profile.pdf")), images="embed")
+    md = bp_norm(r.markdown)
+    for words_ in ["Compares the current year,", "Northwind Securities Ltd", "Block Risk Trade (CT)",
+                   "Portfolio Optimization (PO)"]:
+        check(f"broker profile: words keep their spaces ({words_})", words_ in md, md[:400])
+    check("broker profile: data bars are not charts", "Chart" not in md and not figure_blocks(r),
+          re.findall(r".*Chart.*", md)[:3])
+    tables = [[[bp_norm(c) for c in row] for row in t] for t in table_rows(md)]
+    cells = {c for t in tables for row in t for c in row}
+    check("broker profile: sidebar is not part of a table",
+          not any(w in c for c in cells for w in ("Definitions", "Filters", "Algorithm", "Compares")),
+          [c for c in cells if "Definitions" in c or "Algorithm" in c][:3])
+    check("broker profile: sidebar shown once, before the tables",
+          md.count("Definitions:") == 1 and md.find("Definitions:") < md.find("|"), md.count("Definitions:"))
+    for title, note, table in bp_expected():
+        got = next((t for t in tables if table[1] in t), None)
+        name = title or "continued table"
+        check(f"broker profile: {name} reads row for row", got == table,
+              f"\n        want {table[:3]}\n        got  {(got or tables)[:3]}")
+        if title:
+            check(f"broker profile: {title} is a heading", re.search(r"(?m)^#+ " + re.escape(title) + "$", md),
+                  title)
+        if note:
+            check(f"broker profile: note under {title}", re.search(r"(?m)^\*" + re.escape(note) + r"\*$", md),
+                  note)
+    check("broker profile: block spans slice to content", spans_ok(r))
+
+
+def test_group_label_fill_stops():
+    import pdf2md as P
+    rows = [["", "A", "B"], ["CS IS", "8.33", "7.59"], ["ECO", "", ""], ["", "7.54", "8.24"], ["FIN", "", ""]]
+    got = P.fill_rows(rows, 1, [""])
+    check("group labels: a label on a row of its own stops the copying (values row stays unlabelled)",
+          got[3][0] == "", got)
+    rows = [["", "", "A"], ["Equity", "Cash", "1"], ["", "Deriv", "2"], ["", "Total", "3"]]
+    got = P.fill_rows(rows, 2, ["", ""])
+    check("group labels: copied down, but a total row keeps its blanks",
+          got[2][0] == "Equity" and got[3][0] == "", got)
+
+
 def test_rotated_scans():
     import pdf2md as P
     if not P.ocr_available():
@@ -765,6 +984,8 @@ if __name__ == "__main__":
     test_chart_text_fold_only_labels()
     test_mixed_page()
     test_rotated_scans()
+    test_broker_profile()
+    test_group_label_fill_stops()
     test_scorecard("aligned")
     test_scorecard("unaligned", right_row=12.0)
     test_scorecard("path-bars", bars_as_paths=True)

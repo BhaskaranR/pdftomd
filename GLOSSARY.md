@@ -2,6 +2,24 @@
 
 Turns documents (PDFs, spreadsheets, emails) into Markdown that reads the same as Firecrawl's output.
 
+## PDFs
+
+**Dashboard page**:
+A PDF page exported from a reporting dashboard: small text, a sidebar, stacked tables under shaded title bands, often data bars.
+_Avoid_: Report page, Tableau page
+
+**Sidebar**:
+A tall coloured panel at the side of a dashboard page holding its title, filters and definitions; read before the page's tables and shown once while it repeats unchanged.
+_Avoid_: Legend, side panel, navigation
+
+**Data bar**:
+A coloured bar drawn inside a table row that only pictures a value the row also prints; the printed value is kept, the bar is not.
+_Avoid_: Chart, in-cell chart, sparkline
+
+**Group label**:
+A row label printed once above the rows it covers (such as "Investment Grade" over Cash, Deriv); copied onto each of those rows in the output.
+_Avoid_: Merged cell, parent row, category
+
 ## Spreadsheets
 
 **Workbook**:
