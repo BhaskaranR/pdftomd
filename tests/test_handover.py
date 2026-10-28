@@ -9,7 +9,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-CODE = ["pdf2md.py", "sheet2md.py", "chunk2md.py"]
+CODE = ["pdf2md.py", "sheet2md.py", "chunk2md.py", "msg2md.py"]
 fails = 0
 
 
@@ -101,9 +101,9 @@ def test_sections_identical():
     for name in CODE:
         src = open(os.path.join(ROOT, name), encoding="ascii").read()
         a = src.find("# ---- transcription check ")
-        b = src.find('FINGERPRINTS = """', a)
+        b = src.find('\nFINGERPRINTS = """\n', a)
         secs.append(src[a:b] if a >= 0 and b > a else None)
-    check("check section present and identical in all three files", secs[0] and len(set(secs)) == 1,
+    check("check section present and identical in all code files", secs[0] and len(set(secs)) == 1,
           [len(x or "") for x in secs])
 
 

@@ -1,6 +1,6 @@
 # pdftomd
 
-Turns documents (PDFs, spreadsheets) into Markdown that reads the same as Firecrawl's output.
+Turns documents (PDFs, spreadsheets, emails) into Markdown that reads the same as Firecrawl's output.
 
 ## Spreadsheets
 
@@ -31,3 +31,29 @@ _Avoid_: Cached value, computed value
 **Number format**:
 The workbook's instruction for how a stored number is displayed (currency, percent, thousands, date).
 _Avoid_: Cell format, style
+
+## Emails
+
+**Email**:
+One message file (Outlook .msg or .eml): its header, message text and attachments; becomes one Markdown document.
+_Avoid_: Mail, msg file
+
+**Message text**:
+The words the sender wrote, including any quoted earlier replies below them.
+_Avoid_: Content, body (fine in code)
+
+**Attachment**:
+A file the email carries that Outlook shows with a paperclip; read into its own section when it is a PDF, picture, workbook or attached email.
+_Avoid_: Enclosure, file
+
+**Inline picture**:
+A picture placed inside the message text rather than attached; shown where it sits, never listed as an attachment.
+_Avoid_: Embedded image, CID image
+
+**Meeting invite**:
+An email that carries a meeting's time and place; shows attendees, start, end and location instead of To and Cc.
+_Avoid_: Appointment, calendar item
+
+**Attached email**:
+An email carried as an attachment of another; read the same way, at most three levels deep.
+_Avoid_: Forwarded mail, nested msg

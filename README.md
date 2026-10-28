@@ -163,6 +163,51 @@ chunk(convert("report.pdf"), max_chars=1000)        # also takes a spreadsheet r
 | Left out | Page headers, footers and numbers; page markers |
 | `oversize: true` | A single row, list item or code block bigger than the size, kept whole |
 
+## Emails (Outlook .msg, .eml)
+
+Not in Firecrawl. `msg2md.py` (standard library only) reads Outlook `.msg` files and `.eml` files;
+`scrape()` and the CLI pick it automatically (file name or URL path, Content-Type, then the bytes) and
+read the attachments with the same code as everything else:
+
+```bash
+python pdf2md.py mail.msg -o mail.md                     # pictures -> mail_images/
+python pdf2md.py mail.msg --password secret --mode fast  # PDF options apply to attached PDFs
+python msg2md.py mail.eml                                # email-only CLI: attachments listed, not read
+```
+
+One email becomes one document:
+
+```
+# <subject>
+
+**From:** Name <address>
+**To:** ...   **Cc:** ...   **Bcc:** ... (when the file has them)
+**Date:** 2026-10-26 14:03 UTC
+**Attachments:** report.pdf, budget.xlsx
+
+<message text>
+
+## Attachment: report.pdf
+
+<the PDF converted as on its own, its headings pushed down two levels>
+```
+
+| Part | How |
+|---|---|
+| People | `Name <address>`; Exchange-internal addresses (`/O=EXCHANGELABS/…`) give the name only |
+| Meeting invites | Attendees, Optional, Start, End and Location lines instead of To and Cc |
+| Message text | The HTML version when there is one, converted with the rules of Firecrawl's web-page converter (a port of [`firecrawl/html-to-markdown`](https://github.com/firecrawl/html-to-markdown) with its GitHub-flavored and code-block plugins; `<head>` dropped). Unlike Firecrawl, tables that only lay the email out (marked `role="presentation"`, one column, or holding tables, headings, lists or quotes) are unwrapped to their content and tracking pixels (0–1 px or hidden) are dropped; data tables stay tables. Else Outlook's RTF: HTML wrapped in RTF goes the same way; other RTF gives its words, paragraphs and table rows (no bold/italic). Else the plain text, as written. Quoted reply history is kept. Headings in HTML text go one level under the subject; plain and RTF text stay as written |
+| Attachments read | PDFs (the `pdf` parser's options and `--password`), pictures (OCR, with the `image` parser), workbooks (xlsx, xlsm, csv; `--include-hidden`, `--charts`), attached emails up to 3 levels deep |
+| Listed only | Everything else (old `.xls`, Word, text, zip, …); a PDF or picture when its parser is off |
+| Pictures | Under 10 KB (logos, icons) are skipped. Pictures pasted into the text (hidden, or pointed at by `cid:`) are put where they sit (saved, embedded or left out per `images`) with their OCR text; they are not in the Attachments line |
+| Unreadable attachments | A password-protected or damaged file gets `_Could not be read: <reason>._` in its section and a warning; the rest goes on |
+| Metadata | `title`, `contentType`, `from`, `to`, `cc`, `bcc`, `date` (ISO, UTC), `attachments` (`name`, `size`, `contentType`, `read`); invites add `start`, `end`, `location` |
+| Not returned | `pages` and `blocks` (a warning says so); `parsers: []` returns the file base64'd |
+| Errors | `EMAIL_UNREADABLE` (damaged file), `EMAIL_UNSUPPORTED` (an old Office file that is not an email) |
+
+Tests: `python tests/test_mail.py` (emails built by `tests/make_mail.py` with invented data; the HTML
+converter is checked against html-to-markdown's own expected outputs in `tests/html2md/`).
+
 ## Charts and scanned pages (vision step)
 
 The `prepare` and `merge` commands of `pdf2md.py` add chart data and scanned-page structure using the agent's own vision
@@ -201,7 +246,7 @@ Firecrawl routes a whole document to its hosted parser when any page has a table
 per page, with the agent's model, and checks the result against the text layer.
 
 To install it as an agent skill, follow "Install" in `skill/SKILL.md`: a folder with SKILL.md,
-LICENSE, NOTICE and `scripts/` holding the three code files, checked with `--verify`.
+LICENSE, NOTICE and `scripts/` holding the four code files, checked with `--verify`.
 Tests: `python tests/test_vision.py` (checks that need Tesseract are skipped without it).
 
 ## Limits
@@ -231,6 +276,7 @@ python tests/test_sheet.py                   # spreadsheets: Firecrawl sample + 
 python tests/test_chunk.py                   # chunks for embeddings
 python tests/test_fonts.py                   # symbol fonts (Symbol, ZapfDingbats, Wingdings, Word private-use codes)
 python tests/compare_anydoc.py               # sheet2md vs Firecrawl's converter built locally (needs Rust; see tests/anyref)
+python tests/test_mail.py                    # emails: .msg/.eml, attachments, HTML/RTF message text
 python tests/make_scorecard.py tests/samples/scorecard.pdf   # synthetic scorecard (invented data)
 ```
 
@@ -242,12 +288,13 @@ If you copy, retype or OCR this code into another environment, each file checks 
 python3 pdf2md.py --verify        # "all N functions and constants match", or the names that differ
 python3 sheet2md.py --verify
 python3 chunk2md.py --verify
+python3 msg2md.py --verify
 ```
 
 Nothing else is needed on the other side: the fingerprint list (one entry per function or constant)
 is at the end of each file. Whitespace and comments don't count; any change to code, numbers or
 strings does; works the same on Python 3.11-3.13. After a code change, `python3 pdf2md.py --refresh`
-(and the same for the other two) rewrites the file's own list; tests/test_handover.py fails if one is
+(and the same for the other three) rewrites the file's own list; tests/test_handover.py fails if one is
 stale. The code files are plain ASCII, so nothing is lost in copying.
 
 ## License
