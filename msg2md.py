@@ -915,9 +915,9 @@ RTF_SKIP = {"fonttbl", "colortbl", "stylesheet", "info", "pict", "object", "list
             "pgdsctbl", "filetbl", "revtbl", "header", "footer", "headerl", "headerr", "headerf", "footerl",
             "footerr", "footerf", "footnote", "nonshppict", "shppict", "fldinst", "mhtmltag", "listtext",
             "pntext", "pntxta", "pntxtb"}
-RTF_SYMBOLS = {"lquote": "‘", "rquote": "’", "ldblquote": "“", "rdblquote": "”",
-               "bullet": "•", "emdash": "—", "endash": "–", "emspace": " ",
-               "enspace": " ", "qmspace": " ", "tab": "\t"}
+RTF_SYMBOLS = {"lquote": "\u2018", "rquote": "\u2019", "ldblquote": "\u201c", "rdblquote": "\u201d",
+               "bullet": "\u2022", "emdash": "\u2014", "endash": "\u2013", "emspace": "\u2003",
+               "enspace": "\u2002", "qmspace": "\u2005", "tab": "\t"}
 
 
 def _rtf_codec(cp):
@@ -1059,7 +1059,7 @@ def rtf_body(raw: bytes):
             elif ch == "~":
                 emit("\xa0")
             elif ch == "_":
-                emit("‑")
+                emit("\u2011")
             continue
         if kind in ("hex", "byte"):
             if skip_n:
@@ -2034,6 +2034,11 @@ def convert(src, read_attachment=None, ext: Optional[str] = None) -> Result:
 
 
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--verify"]:
+        sys.exit(verify())
+    if argv[:1] == ["--refresh"]:
+        sys.exit(refresh())
     ap = argparse.ArgumentParser(description="Email (Outlook .msg, .eml) -> Markdown. Attachments are "
                                              "listed; use pdf2md.py to read them too.")
     ap.add_argument("src")
@@ -2052,6 +2057,221 @@ def main(argv=None):
     else:
         sys.stdout.write(r.markdown)
     return 0
+
+
+
+# ---- transcription check -----------------------------------------------------------------------
+# After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
+# function and constant with the fingerprints below; whitespace and comments don't count, any change
+# to code, numbers or text in strings does. After a code change: `python3 <this file> --refresh`.
+
+def _fingerprints(src):
+    """['<8 hex> <name>'] for each top-level function, class and constant, in file order."""
+    import ast
+    import hashlib
+    import io as _io
+    import tokenize
+    lines = src.splitlines(keepends=True)
+    skip = {"COMMENT", "NL", "NEWLINE", "ENDMARKER"}
+    out = []
+    for node in ast.parse(src).body:
+        if not isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Assign)):
+            continue
+        name = getattr(node, "name", None) or getattr(node.targets[0], "id", None)
+        if not name or name == "FINGERPRINTS":
+            continue
+        seg = lines[node.lineno - 1:node.end_lineno]
+        toks, depth, start = [], 0, None
+        for t in tokenize.generate_tokens(_io.StringIO("".join(seg)).readline):
+            kind = tokenize.tok_name[t.type]
+            if kind == "FSTRING_START":          # Python 3.12+: rebuild the whole f-string
+                depth += 1
+                start = start or t.start
+            elif kind == "FSTRING_END":
+                depth -= 1
+                if depth == 0:
+                    (r0, c0), (r1, c1) = start, t.end
+                    text = "".join(seg[r0 - 1:r1])[c0:len("".join(seg[r0 - 1:r1 - 1])) + c1]
+                    toks.append("STRING:" + text)
+                    start = None
+            elif depth == 0 and kind not in skip:
+                toks.append(kind + ":" + t.string)
+        out.append(hashlib.sha256("\x00".join(toks).encode()).hexdigest()[:8] + " " + name)
+    return out
+
+
+def verify(path=None):
+    """Compare this file's code with FINGERPRINTS; print the result, return 0 if all match."""
+    import os
+    path = path or __file__
+    try:
+        have = _fingerprints(open(path, encoding="utf-8").read())
+    except SyntaxError as e:
+        print(f"{os.path.basename(path)}: does not parse at line {e.lineno} (check indentation there)")
+        return 1
+    want = FINGERPRINTS.split()
+    want = [f"{want[i]} {want[i + 1]}" for i in range(0, len(want), 2)]
+    differ = [w.split()[1] for w in want if w not in have] + \
+        [h.split()[1] + " (not in the list)" for h in have if h not in want]
+    name = os.path.basename(path)
+    if differ:
+        print(f"{name}: {len(differ)} differ: " + ", ".join(dict.fromkeys(differ)))
+        return 1
+    print(f"{name}: all {len(want)} functions and constants match")
+    return 0
+
+
+def refresh(path=None):
+    """Rewrite FINGERPRINTS (below) from this file's current code. Return 0."""
+    import os
+    import re as _re
+    path = path or __file__
+    src = open(path, encoding="ascii").read()
+    listing = "\n".join(_fingerprints(src))
+    new = _re.sub(r'^FINGERPRINTS = """\n.*?"""', lambda _: 'FINGERPRINTS = """\n' + listing + '\n"""', src,
+                  count=1, flags=_re.M | _re.S)
+    if new != src:
+        open(path, "w", encoding="ascii").write(new)
+    print(f"{os.path.basename(path)}: fingerprint list {'updated' if new != src else 'already current'}")
+    return 0
+
+
+FINGERPRINTS = """
+a463c93b OLE_MAGIC
+f7213c24 MAX_DEPTH
+71021000 MIN_PICTURE_BYTES
+baafb203 CONTENT_TYPE_OF
+8dc21f07 MailError
+52263620 Result
+1b164927 SECTOR_FREE
+0d698a62 END_OF_CHAIN
+1134b517 FAT_SECTOR
+67918c49 DIFAT_SECTOR
+4f9489e8 MAX_REGULAR_SECTOR
+bdde6402 NO_STREAM
+e6adf5b6 MAX_REGULAR_STREAM_ID
+4a392685 MINI_STREAM_CUTOFF
+06fb5132 OBJ_STORAGE
+0844ef58 OBJ_STREAM
+4040e0bc OBJ_ROOT
+a6598261 _bad
+bf9f6dca Compound
+eb4023c5 PT_SHORT
+f6761800 PT_LONG
+e7bf251b PT_FLOAT
+67aa2c8b PT_DOUBLE
+dc58d348 PT_CURRENCY
+46e972fa PT_APPTIME
+200a2e5b PT_ERROR
+ed5be63b PT_BOOLEAN
+f6a80f5e PT_OBJECT
+da3a8b30 PT_I8
+815642cd PT_STRING8
+f7c46173 PT_UNICODE
+efd94e5d PT_SYSTIME
+7a07c461 PT_BINARY
+2d378218 PS_MAPI
+73f87657 PS_PUBLIC_STRINGS
+1d3b62eb PSETID_APPOINTMENT
+903e7b28 LID_LOCATION
+c1f27101 LID_START
+6f33b2e7 LID_END
+ca6daf48 SUBSTG_RE
+542f32ab CODEPAGES
+52e91287 codec_of
+3a634a64 filetime
+af62c80b Props
+1ecb1252 named_ids
+2d7418f9 Attachment
+6d0b7fd3 Mail
+5621534d _person
+10bf03f5 read_msg
+36fb24fc _message
+5c458f87 CID_REF_RE
+839faa05 _cid_refs
+19740b20 _is_message
+4dfa68a8 decode_html
+f0f01f8c read_eml
+8f12242b _addresses
+f35c29df _leaf_parts
+b25c0683 _part_text
+ef073dec _eml_message
+dc0ba3b9 MD_INLINE
+5ca0b1c9 md_escape
+dddee035 person_md
+05312bec when
+b353c037 iso
+2d92db02 FENCE_RE
+7e3fbd60 HEADING_RE
+0e960282 shift_headings
+77ccd5f2 plain_text_md
+7403780a CID_TEXT_RE
+944027fa is_picture
+9b6c1430 render
+f5184884 person_text
+79ce6038 message_text
+6aaf8261 RTF_PREBUF
+d8ae9ab2 decompress_rtf
+c68438e5 _ascii_letter
+72fb2f21 rtf_tokens
+02ed6281 RTF_CODEPAGES
+d25117cb RTF_CHARSETS
+46de13f7 RTF_SKIP
+a0a4ccea RTF_SYMBOLS
+3a7d7534 _rtf_codec
+340d9991 rtf_body
+87acfea0 GO_WS
+62a5e392 go_trim
+ea8fe1b8 go_space
+096025ae go_punct
+efc38fe2 Node
+b8bfb3f4 VOID
+91af5b90 HEAD_TAGS
+a4261c89 CLOSES_P
+482801ca SCOPE
+8e83b3e7 HEADINGS
+f3f3d35e _OpenElements
+eff97c57 _TreeBuilder
+8ee105f9 parse_html
+e1498239 INLINE
+c3473646 TRIMMED
+6dfc4356 LIST_PREFIX
+3971e973 LIST_COUNT
+415078f4 LIST_PREV
+81fc00f0 MARKDOWN_IMAGE_RE
+e1b285e3 _escape_markdown
+5d5984ca _collect_text
+759b799e _prev_text
+0e4ce90a _next_text
+1a9aef8b _add_space
+9ca5f74b LINE_TRIM_RE
+3945f69e _trim_leading_spaces
+540584d5 _trim_trailing_spaces
+fe31b736 _escape_multiline
+166f3718 _fence_count
+79f1dd89 _code_fence
+77f990ba _every_line
+71b7b2d6 _is_list_item
+bdcf5065 _indent_list_item
+eb0dd217 _annotate_lists
+4c01c9f5 LAYOUT_INSIDE
+95d0c26c PIXEL_STYLE_RE
+388e496e _own_rows
+7e84b560 _cells
+5f5479f6 _is_layout_table
+4cd3bc76 _is_pixel
+0fac7310 _unwrap_layout
+f98f94db _HtmlToMarkdown
+0cc83141 html_to_markdown
+7809039b EML_HEADER_RE
+1cccad35 EML_KEYS
+6670673f email_ext
+824d8349 convert
+d3c60045 main
+a3f20c3b _fingerprints
+cc642faa verify
+b3a8ba0f refresh
+"""
 
 
 if __name__ == "__main__":

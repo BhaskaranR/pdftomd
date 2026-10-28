@@ -10,3 +10,5 @@
   it had already shipped in PR #6 from another session (the list was stale). Before recommending or planning
   work, check main's git log and code for it (`git log --oneline origin/main | grep -i <topic>`), not just
   the open-work list; fix the list when it's stale.
+- 2026-10-27: Planned .msg support from scratch; PR #13 (msg2md.py, .msg + .eml) was already open from another
+  session. Before planning a feature, also check open PRs and branches: `gh pr list --state all | grep -i <topic>`.

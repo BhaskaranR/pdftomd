@@ -13,7 +13,7 @@ Full decisions: grilling session 2026-10-26 (plan file squishy-roaming-cookie.md
 - [x] 3. `msg2md.py` part 2: HTML → markdown (firecrawl/html-to-markdown rules, golden pairs from its testdata),
       compressed RTF (MS-OXRTFCP vector) + RTF reader (anydoc port, checked with anyref), `.eml`.
 - [x] 4. `pdf2md.py`: scrape() email branch (before sheets — .msg is OLE like .xls), attachment reading
-      (PDF/image/workbook), inline pictures, CLI; `make_skill.py` ships msg2md.py.
+      (PDF/image/workbook), inline pictures, CLI; SKILL.md "Install" lists msg2md.py.
 - [x] 5. README, skill/SKILL.md, CLAUDE.md, NOTICE, GLOSSARY.md; fingerprints; goldens `tests/out/mail/`.
 - [x] 6. All checks (test_mail, test_sheet, test_layout, test_contract, report.pdf diff).
 

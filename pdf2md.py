@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-pdf2md — PDF to Markdown converter.
+pdf2md -- PDF to Markdown converter.
 
 A Python port of the pipeline behind Firecrawl's PDF scraping
 (firecrawl/firecrawl apps/api/native/src/pdf.rs -> the MIT-licensed
 `pdf-inspector` crate), rebuilt on pdfplumber/pdfminer for low-level parsing.
 
 Pipeline (mirrors pdf-inspector):
-  1. classify   – TextBased / Scanned / ImageBased / Mixed + confidence,
+  1. classify   - TextBased / Scanned / ImageBased / Mixed + confidence,
                   per-page OCR routing                  (detector.rs)
-  2. extract    – position-aware words with font, size, bold/italic/mono
-  3. tables     – rectangle/ruling-line tables, then text-alignment
+  2. extract    - position-aware words with font, size, bold/italic/mono
+  3. tables     - rectangle/ruling-line tables, then text-alignment
                   (heuristic) tables                      (tables/*.rs)
-  4. layout     – multi-column detection and reading order
-  5. furniture  – strip repeated running headers/footers and page numbers
+  4. layout     - multi-column detection and reading order
+  5. furniture  - strip repeated running headers/footers and page numbers
                                                           (markdown/furniture.rs)
-  6. analysis   – body font size (with base-size correction), heading
-                  tiers H1–H4 by font-size ratio          (markdown/analysis.rs)
-  7. convert    – paragraphs, headings, lists, code blocks, bold/italic,
+  6. analysis   - body font size (with base-size correction), heading
+                  tiers H1-H4 by font-size ratio          (markdown/analysis.rs)
+  7. convert    - paragraphs, headings, lists, code blocks, bold/italic,
                   links, tables, images                   (markdown/convert.rs)
-  8. postprocess – dehyphenation, whitespace cleanup      (markdown/postprocess.rs)
+  8. postprocess - dehyphenation, whitespace cleanup      (markdown/postprocess.rs)
 
 Additions over pdf-inspector: embedded images are extracted (saved to a
 folder or inlined as base64), and scanned pages can be OCR'd with Tesseract.
@@ -58,7 +58,7 @@ from typing import Iterable, Optional
 
 import pdfplumber
 
-# ───────────────────────────── constants (from pdf-inspector) ──────────────
+# ----------------------------- constants (from pdf-inspector) --------------
 
 TEXT_PAGE_RATIO_THRESHOLD = 0.6     # detector.rs DetectionConfig default
 MIN_TEXT_CHARS_PER_PAGE = 20        # below this a page is "no text"
@@ -72,8 +72,11 @@ FURNITURE_PAGE_FRACTION = 0.30
 FURNITURE_Y_STDDEV = 0.05
 MIN_IMAGE_PT = 24                   # ignore tiny images (icons, bullets, rules)
 
-BULLETS = "•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔-–—*"
-BULLET_RE = re.compile(r"^\s*([•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤]|[-✓✔–—*](?=\s))\s*")   # ticks/dashes need a space
+BULLETS = ("\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6\u25c7\u25ba\u25b8"
+           "\u27a2\u27a4\u2713\u2714-\u2013\u2014*")
+# ticks/dashes need a space after them
+BULLET_RE = re.compile(r"^\s*([\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6"
+                       r"\u25c7\u25ba\u25b8\u27a2\u27a4]|[-\u2713\u2714\u2013\u2014*](?=\s))\s*")
 NUMBERED_RE = re.compile(
     r"^\s*(\(?(\d{1,3}|[a-zA-Z]|[ivxlcdm]{1,6})[.)])\s+(?=\S)", re.I)
 MONO_RE = re.compile(r"mono|courier|consol|menlo|inconsolata|code|typewriter|"
@@ -85,7 +88,7 @@ CID_RE = re.compile(r"\(cid:\d+\)")
 CID_MARK = "\x00cid"
 
 
-# ───────────────────────────── data types ─────────────────────────────────
+# ----------------------------- data types ---------------------------------
 
 @dataclass
 class Word:
@@ -168,7 +171,7 @@ class Result:
     warnings: list = field(default_factory=list)
 
 
-# ───────────────────────────── small helpers ──────────────────────────────
+# ----------------------------- small helpers ------------------------------
 
 def mass_fraction(words, pred) -> float:
     total = sum(len(w.text) for w in words)
@@ -248,7 +251,7 @@ def table_to_md(rows) -> str:
     return "\n".join(out)
 
 
-# ───────────────────────────── 1. classification ──────────────────────────
+# ----------------------------- 1. classification --------------------------
 
 def image_coverage(page) -> float:
     area = page.width * page.height or 1
@@ -330,12 +333,12 @@ def classify(stats: list) -> tuple:
     return ("Mixed", 0.7, needs_ocr)
 
 
-# ───────────────────────────── 2. extraction ──────────────────────────────
+# ----------------------------- 2. extraction ------------------------------
 
 # ---- symbol fonts (port of pdf-inspector base14.rs / fonts.rs) ----
 # Symbol and ZapfDingbats read through their own built-in encodings, which pdfminer doesn't apply
-# (code 0x61 is α, not a). Word writes symbol fonts as private-use U+F000+code; those go through the
-# font's own table when it is a known symbol font (Symbol, ZapfDingbats, Wingdings 1-3 — the Wingdings
+# (code 0x61 is <U+03B1>, not a). Word writes symbol fonts as private-use U+F000+code; those go through the
+# font's own table when it is a known symbol font (Symbol, ZapfDingbats, Wingdings 1-3 -- the Wingdings
 # codes are Unicode's mapping, UTC L2/12-368), otherwise through pdf-inspector's rule (bullets and a
 # check mark, else the plain character: text fonts that store ordinary letters there).
 SYMBOL_FONT_TABLES = {   # font code -> Unicode, rows of 16 codes (2x = 0x20-0x2F), - = no glyph
@@ -580,7 +583,7 @@ def group_lines(words, pageno) -> list:
     for ln in lines:
         ln.words.sort(key=lambda w: w.x0)
         if ln.words and ln.words[0].text == CID_MARK and len(ln.words) > 1:
-            ln.words[0].text = "•"
+            ln.words[0].text = "\u2022"
         ln.words = [w for w in ln.words if w.text != CID_MARK]
     lines = [l for l in lines if l.words]
     lines.sort(key=lambda l: (l.top, l.x0))
@@ -627,7 +630,7 @@ def segments(line, gap_factor=1.0, min_gap=6.0) -> list:
     return segs
 
 
-# ───────────────────────────── 3. tables ──────────────────────────────────
+# ----------------------------- 3. tables ----------------------------------
 
 def ruled_tables(page, origin=None) -> list:
     """Rectangle / ruling-line tables (tables/detect_rects.rs, detect_lines.rs).
@@ -783,7 +786,7 @@ def runs_on_like_prose(rows_lines, segs_of) -> bool:
 
 def heuristic_tables(lines, page_width, rules=()) -> list:
     """Text-alignment tables (tables/detect_heuristic.rs, simplified):
-    ≥3 consecutive rows whose cell segments leave consistent vertical
+    >=3 consecutive rows whose cell segments leave consistent vertical
     gutters, with short cells (prose in two columns is rejected). A header row
     underlined by a rule makes a 2-row table (header + one data row) valid too.
     `page_width` is the width of the region being scanned."""
@@ -850,7 +853,8 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
                                         min(l.x0 for l in rows_lines))
         firsts = [segments(l)[0] for l in rows_lines]
         markerish = sum(1 for f in firsts if len(f) == 1 and (
-            re.fullmatch(r"[•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔*\-–—]|\(?\w{1,3}[.)]?", f[0].text)
+            re.fullmatch(r"[\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043\u2219\u00b7\u25c6"
+                         r"\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714*\-\u2013\u2014]|\(?\w{1,3}[.)]?", f[0].text)
             or f[0].text == CID_MARK))
         if markerish == len(firsts) and all(len(segments(l)) == 2 for l in rows_lines):
             i = best_j + 1
@@ -889,7 +893,7 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
     return out
 
 
-# ───────────────────────────── 4. images ──────────────────────────────────
+# ----------------------------- 4. images ----------------------------------
 
 def page_images(page, pageno, skip_fraction) -> list:
     """Embedded images worth keeping. ImageRef.bbox is absolute (for cropping);
@@ -937,9 +941,9 @@ def save_image(page, ref, mode, image_dir, stem, dpi):
     return True
 
 
-# ───────────────────────────── 5. OCR ─────────────────────────────────────
+# ----------------------------- 5. OCR -------------------------------------
 
-# ───────────────────────────── 4b. vector graphics: rules and charts ───────
+# ----------------------------- 4b. vector graphics: rules and charts -------
 
 CHART_DILATE = 18.0       # shapes closer than this belong to one chart
 MAX_SHAPES = 4000         # beyond this a page is a drawing/map: skip chart detection
@@ -1057,14 +1061,14 @@ CHART_MIN_TICKS = 3         # and an axis has several plain-number ticks
 
 
 def chart_labels(words) -> str:
-    """A chart's text in reading order, one label per gap-separated segment: "14, 12, …, Alpha".
+    """A chart's text in reading order, one label per gap-separated segment: "14, 12, ..., Alpha".
     "" when the text doesn't look like chart labels (a shaded table mistaken for a chart keeps
     its text where it is)."""
     out = []
     for ln in group_lines(words, 0):
         out += [join_words(sg) for sg in segments(ln)]
     out = [t for t in out if t.strip()]
-    ticks = sum(1 for t in out if re.fullmatch(r"[-−(]?\d[\d,.]*%?\)?", t))
+    ticks = sum(1 for t in out if re.fullmatch(r"[-\u2212(]?\d[\d,.]*%?\)?", t))
     if ticks < CHART_MIN_TICKS or any(len(t.split()) > CHART_LABEL_MAX_WORDS for t in out):
         return ""
     return ", ".join(out)
@@ -1275,7 +1279,7 @@ def ocr_image(img, lang="eng", k=1.0, unrotate=None) -> Optional[list]:
     return out
 
 
-# ───────────────────────────── 6. layout / reading order ──────────────────
+# ----------------------------- 6. layout / reading order ------------------
 
 def segment_regions(words, rules, obstacles, box, depth=0) -> list:
     """Split a page area into reading-order regions where independent blocks sit
@@ -1544,12 +1548,12 @@ def set_colw(lines):
     ws = [l.x1 - l.x0 for l in lines if len(l.words) > 3]
     if not ws:
         return
-    w = sorted(ws)[int(len(ws) * 0.8)]   # 80th percentile ≈ full line width
+    w = sorted(ws)[int(len(ws) * 0.8)]   # 80th percentile ~ full line width
     for l in lines:
         l.colw = w
 
 
-# ───────────────────────────── 7. furniture ───────────────────────────────
+# ----------------------------- 7. furniture -------------------------------
 
 def normalize_for_comparison(s: str) -> str:
     s = " ".join(s.split())
@@ -1561,12 +1565,12 @@ def normalize_for_comparison(s: str) -> str:
 def is_structural(text: str) -> bool:
     t = text.lstrip()
     numbered = t[:1].isdigit() and (". " in t or ") " in t)
-    return (t.startswith(("#", "- ", "* ", "• ")) or numbered or
+    return (t.startswith(("#", "- ", "* ", "\u2022 ")) or numbered or
             bool(re.match(r"^\((\d{1,3}|[a-z]{1,3})\)", t)))
 
 
 PAGE_NUM_RE = re.compile(
-    r"^\s*(page\s+)?[-–—(\[]?\s*\d{1,4}\s*[-–—)\]]?\s*((of|/)\s*\d{1,4})?\s*$", re.I)
+    r"^\s*(page\s+)?[-\u2013\u2014(\[]?\s*\d{1,4}\s*[-\u2013\u2014)\]]?\s*((of|/)\s*\d{1,4})?\s*$", re.I)
 
 
 def line_text(l) -> str:
@@ -1657,7 +1661,7 @@ def strip_furniture(pages_lines: dict, page_heights: dict) -> dict:
     return out, removed
 
 
-# ───────────────────────────── 8. font analysis ───────────────────────────
+# ----------------------------- 8. font analysis ---------------------------
 
 def body_font_size(lines) -> float:
     c = Counter()
@@ -1669,7 +1673,7 @@ def body_font_size(lines) -> float:
 
 
 def correct_base_size(lines, base) -> float:
-    """analysis.rs correct_base_size: if ≥1/3 of text lines clear the heading
+    """analysis.rs correct_base_size: if >=1/3 of text lines clear the heading
     gate and they read like prose, the promoted size is really the body."""
     text_lines = 0
     promoted, wordy = Counter(), Counter()
@@ -1748,14 +1752,14 @@ def header_level(size, base, tiers, bold) -> Optional[int]:
     return 4
 
 
-# ───────────────────────────── 9. markdown conversion ─────────────────────
+# ----------------------------- 9. markdown conversion ---------------------
 
 def is_list_item(text: str) -> bool:
     return bool(BULLET_RE.match(text) or NUMBERED_RE.match(text))
 
 
 def hanging_number(line) -> bool:
-    """'1   Item text' — a bare number set off by a wide hanging-indent gap."""
+    """'1   Item text' -- a bare number set off by a wide hanging-indent gap."""
     w = line.words
     return (len(w) > 1 and re.fullmatch(r"\d{1,3}", w[0].text) is not None
             and w[1].x0 - w[0].x1 > w[0].size * 0.8)
@@ -1765,7 +1769,7 @@ def list_marker(text: str):
     """Return (markdown_marker, rest)."""
     m = BULLET_RE.match(text)
     if m:
-        tick = m.group(1) if m.group(1) in "✓✔" else ""     # a tick is content: "- ✓ Done"
+        tick = m.group(1) if m.group(1) in "\u2713\u2714" else ""     # a tick is content: "- v Done"
         return "-", (tick + " " if tick else "") + text[m.end():]
     m = NUMBERED_RE.match(text)
     if m:
@@ -1950,10 +1954,12 @@ def render_blocks(ordered, base, tiers, col_width, image_md) -> list:
             flush_list()
             marker, rest_plain = list_marker(text)
             first = ln.words[0].text.strip()
-            if len(ln.words) > 1 and (re.fullmatch(r"[•●○◦▪▫■□‣\u2043∙·◆◇►▸➢➤✓✔*\-–—]", first)
+            if len(ln.words) > 1 and (re.fullmatch(r"[\u2022\u25cf\u25cb\u25e6\u25aa\u25ab\u25a0\u25a1\u2023\u2043"
+                                                   r"\u2219\u00b7\u25c6\u25c7\u25ba\u25b8\u27a2\u27a4\u2713\u2714*\-"
+                                                   r"\u2013\u2014]", first)
                                       or re.fullmatch(r"\(?\d{1,3}[.)]", first)):
                 rest = styled_text(ln.words[1:])   # keep inline styling
-                if first in "✓✔":
+                if first in "\u2713\u2714":
                     rest = f"{first} {rest}"
             else:
                 rest = rest_plain                  # lettered markers stay in text
@@ -2033,7 +2039,7 @@ def norm_bbox(box, w, h):
             (box[0] / w, box[1] / h, box[2] / w, box[3] / h)]
 
 
-# ───────────────────────────── 10. driver ─────────────────────────────────
+# ----------------------------- 10. driver ---------------------------------
 
 class PDFOCRRequiredError(ValueError):
     """Same behaviour as Firecrawl's SCRAPE_PDF_OCR_REQUIRED: fast mode on a
@@ -2403,7 +2409,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
     return r
 
 
-# ───────────────────────────── 11. Firecrawl-style API ────────────────────
+# ----------------------------- 11. Firecrawl-style API --------------------
 
 def is_pdf_buffer(data: bytes) -> bool:
     """Firecrawl's isPdfBuffer: `%PDF` anywhere in the first 1 KB (BOM, whitespace
@@ -2546,14 +2552,14 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
            include_hidden: bool = False, filename: Optional[str] = None,
            charts: bool = False, chunk=None) -> dict:
     """Firecrawl /scrape-compatible call for PDFs, images and spreadsheets.
-    parsers: like Firecrawl — default ["pdf", "image"]; [] returns the file base64'd
+    parsers: like Firecrawl -- default ["pdf", "image"]; [] returns the file base64'd
     in `markdown`. PDF options: {"type": "pdf", "mode": "fast"|"auto"|"ocr",
     "maxPages": int, "pages": bool, "blocks": bool, "pageMarkers": bool}.
     Extras (not in Firecrawl): "images": "save"|"embed"|"none" (default: "save"
-    when image_dir is given, otherwise "embed" — no files are written unasked),
+    when image_dir is given, otherwise "embed" -- no files are written unasked),
     page_range "1-5,8", image_dpi, ocr_lang.
-    Spreadsheets (xlsx, xlsm, csv) are found like Firecrawl does — URL path / file name,
-    then Content-Type, then the bytes — and converted by sheet2md; PDF options don't apply.
+    Spreadsheets (xlsx, xlsm, csv) are found like Firecrawl does -- URL path / file name,
+    then Content-Type, then the bytes -- and converted by sheet2md; PDF options don't apply.
     include_hidden keeps hidden sheets/rows/columns; charts adds each chart's saved numbers
     as a table (not in Firecrawl); filename names a bytes source.
     chunk: True or {"maxChars": N} adds `data.chunks`, the document cut into pieces for
@@ -2668,7 +2674,7 @@ def scrape(url, formats=("markdown",), parsers=None, password=None,
     return {"success": True, "data": out}
 
 
-# ───────────────────────────── 12. vision step (charts, scans) ──────────
+# ----------------------------- 12. vision step (charts, scans) ----------
 
 VISION_DOC = """Charts and scanned pages, read by the agent's own vision model.
 
@@ -2751,7 +2757,7 @@ Output only the Markdown."""
 # ---- numbers ----
 # A number in the model's answer must match the page in value, sign and row.
 
-NUM_RE = re.compile(r"(~\s*)?(\(\s*)?([-−]\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)(\s*\))?")
+NUM_RE = re.compile(r"(~\s*)?(\(\s*)?([-\u2212]\s*)?(?<![\w.])(\d[\d,]*(?:\.\d+)?)(\s*\))?")
 WORD_RE = re.compile(r"[^\W\d_]{2,}")
 GROUPED_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
 ISSUES = (("unverified", "NOT FOUND in page text"), ("sign", "SIGN DIFFERS from page text"),
@@ -2862,7 +2868,7 @@ def check_answer(answer: str, source: str):
                         kind = "wrong_row"
                     else:
                         issues["row_unconfirmed"].append(t["raw"])
-        out.append(answer[last:t["end"]] + (" ⚠" if kind else ""))
+        out.append(answer[last:t["end"]] + (" \u26a0" if kind else ""))
         last = t["end"]
         if kind:
             issues[kind].append(t["raw"])
@@ -3196,7 +3202,7 @@ def error_text(e, password=None) -> str:
     """One-line CLI message for an exception; Firecrawl error codes first."""
     msg = repr(e) + " " + repr(getattr(e, "__cause__", ""))
     if "PDFPasswordIncorrect" in msg:                     # pdfminer wraps password errors
-        return "incorrect password" if password else "this PDF is encrypted — pass --password"
+        return "incorrect password" if password else "this PDF is encrypted \u2014 pass --password"
     if isinstance(e, FileNotFoundError):
         return f"file not found: {e.filename}"
     text = str(e) or type(e).__name__
@@ -3206,6 +3212,10 @@ def error_text(e, password=None) -> str:
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--verify"]:
+        sys.exit(verify())
+    if argv[:1] == ["--refresh"]:
+        sys.exit(refresh())
     if argv and argv[0] in ("prepare", "merge"):
         return vision_main(argv)
     ap = argparse.ArgumentParser(
@@ -3311,6 +3321,263 @@ def main(argv=None):
               f"pages={m.get('numPages')}/{m.get('totalPages')} "
               f"needs_ocr={m.get('pagesNeedingOcr')} time={m.get('processingTimeMs')}ms",
               file=sys.stderr)
+
+
+# ---- transcription check -----------------------------------------------------------------------
+# After this file is copied or retyped somewhere else, `python3 <this file> --verify` compares every
+# function and constant with the fingerprints below; whitespace and comments don't count, any change
+# to code, numbers or text in strings does. After a code change: `python3 <this file> --refresh`.
+
+def _fingerprints(src):
+    """['<8 hex> <name>'] for each top-level function, class and constant, in file order."""
+    import ast
+    import hashlib
+    import io as _io
+    import tokenize
+    lines = src.splitlines(keepends=True)
+    skip = {"COMMENT", "NL", "NEWLINE", "ENDMARKER"}
+    out = []
+    for node in ast.parse(src).body:
+        if not isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Assign)):
+            continue
+        name = getattr(node, "name", None) or getattr(node.targets[0], "id", None)
+        if not name or name == "FINGERPRINTS":
+            continue
+        seg = lines[node.lineno - 1:node.end_lineno]
+        toks, depth, start = [], 0, None
+        for t in tokenize.generate_tokens(_io.StringIO("".join(seg)).readline):
+            kind = tokenize.tok_name[t.type]
+            if kind == "FSTRING_START":          # Python 3.12+: rebuild the whole f-string
+                depth += 1
+                start = start or t.start
+            elif kind == "FSTRING_END":
+                depth -= 1
+                if depth == 0:
+                    (r0, c0), (r1, c1) = start, t.end
+                    text = "".join(seg[r0 - 1:r1])[c0:len("".join(seg[r0 - 1:r1 - 1])) + c1]
+                    toks.append("STRING:" + text)
+                    start = None
+            elif depth == 0 and kind not in skip:
+                toks.append(kind + ":" + t.string)
+        out.append(hashlib.sha256("\x00".join(toks).encode()).hexdigest()[:8] + " " + name)
+    return out
+
+
+def verify(path=None):
+    """Compare this file's code with FINGERPRINTS; print the result, return 0 if all match."""
+    import os
+    path = path or __file__
+    try:
+        have = _fingerprints(open(path, encoding="utf-8").read())
+    except SyntaxError as e:
+        print(f"{os.path.basename(path)}: does not parse at line {e.lineno} (check indentation there)")
+        return 1
+    want = FINGERPRINTS.split()
+    want = [f"{want[i]} {want[i + 1]}" for i in range(0, len(want), 2)]
+    differ = [w.split()[1] for w in want if w not in have] + \
+        [h.split()[1] + " (not in the list)" for h in have if h not in want]
+    name = os.path.basename(path)
+    if differ:
+        print(f"{name}: {len(differ)} differ: " + ", ".join(dict.fromkeys(differ)))
+        return 1
+    print(f"{name}: all {len(want)} functions and constants match")
+    return 0
+
+
+def refresh(path=None):
+    """Rewrite FINGERPRINTS (below) from this file's current code. Return 0."""
+    import os
+    import re as _re
+    path = path or __file__
+    src = open(path, encoding="ascii").read()
+    listing = "\n".join(_fingerprints(src))
+    new = _re.sub(r'^FINGERPRINTS = """\n.*?"""', lambda _: 'FINGERPRINTS = """\n' + listing + '\n"""', src,
+                  count=1, flags=_re.M | _re.S)
+    if new != src:
+        open(path, "w", encoding="ascii").write(new)
+    print(f"{os.path.basename(path)}: fingerprint list {'updated' if new != src else 'already current'}")
+    return 0
+
+
+FINGERPRINTS = """
+25cdc555 TEXT_PAGE_RATIO_THRESHOLD
+8b3fe97b MIN_TEXT_CHARS_PER_PAGE
+891a8316 HEADING_RATIO
+f2b53338 BOLD_TIER_RATIO
+cb30daf5 TIER_TOLERANCE
+ea817e84 MAX_TIERS
+5aab7595 EDGE_LINE_COUNT
+d22aaca5 FURNITURE_MIN_PAGES
+0f4111ec FURNITURE_PAGE_FRACTION
+77b86762 FURNITURE_Y_STDDEV
+2c5ba94a MIN_IMAGE_PT
+1bc6c5eb BULLETS
+68a55cb7 BULLET_RE
+21f3a276 NUMBERED_RE
+e07b829a MONO_RE
+caab2860 BOLD_RE
+17ed9ae3 ITALIC_RE
+8d84ef6e URL_RE
+1210f989 CID_RE
+fa502091 CID_MARK
+b2b7037b Word
+05718000 Line
+f0dd3d08 ImageRef
+f0754d83 Result
+e4a35ae6 mass_fraction
+06dd0dff dominant_size
+e1051b20 join_words
+9ff6c2e3 overlaps
+a7497be1 center_inside
+cb4b19d9 parse_pages
+82f6e571 md_escape_cell
+8e04e66b table_to_md
+c85d3580 image_coverage
+7dbb9b40 SCAN_COVERAGE
+c3d57613 SCAN_MAX_NATIVE_CHARS
+bfb84b3d SCAN_MAX_MARKS
+d634174a INK_DPI
+c23a360a image_marks
+ff9f20eb page_stats
+e1abee19 classify
+49a7793a SYMBOL_FONT_TABLES
+b6891741 _parse_symbol_table
+03a22872 SYMBOL_TABLES
+4e41fa37 BASE14_SYMBOL_NAMES
+5211ebff OWN_ENCODING
+60e28b09 _symbol_table_for
+f320ed33 _clean_private_use
+a5f1ae68 _fix_symbol_font
+7b9818dd open_pdf
+b26df565 page_origin
+b49fbfed extract_words
+ca40bc33 group_lines
+44c11210 merge_drop_caps
+fcf04328 segments
+a1182959 ruled_tables
+c9dc9119 table_header_above
+bb2d635e column_gaps
+164b1936 MAX_TABLE_SCAN_ROWS
+cc104ce8 add_interval
+cd1a1d68 header_ruled
+20a6cea1 PROSE_RUN_ON
+354a5b1f PROSE_MAX_DIGITS
+14c4da6c runs_on_like_prose
+7c0a91bb heuristic_tables
+2b42393b page_images
+3070c80e render_region
+4202ef54 save_image
+168f7458 CHART_DILATE
+0b77998e MAX_SHAPES
+404a0188 color_rgb
+ab2dbdbb whiteish
+f3daf49e horizontal_rules
+e1627f36 _Grid
+af20d9fe _shape
+d6d51ee2 _bbox
+791e5c90 _union
+58e5e4be _cv
+63fa2cb7 BAR_BASE_TOL
+6cca5053 BAR_LEN_CV
+251cdb54 one_colour_bars
+69a2fb9e CHART_LABEL_MAX_WORDS
+d20c207f CHART_MIN_TICKS
+284aad42 chart_labels
+eee12ad6 vector_figures
+d924216f _OCR_WARNED
+9a508bc9 ocr_blocks
+d17fc54d detect_rotation
+b504d738 ocr_available
+aa26e7d7 flatten_alpha
+2a5fda60 ocr_image
+e7e65bb9 segment_regions
+d6bec067 rule_spans_columns
+25954202 region_of
+da2d5a2e find_gutter
+05c03f7d split_at
+cf1ec254 spans_gutter
+454ce672 fills_columns
+cd6043c0 reading_order
+c778cfbe set_colw
+19496748 normalize_for_comparison
+c22b043d is_structural
+47a8e16a PAGE_NUM_RE
+ba0627dd line_text
+6b534385 EXPLICIT_PAGE_NUM_RE
+25a31b52 strip_furniture
+667b6a6d body_font_size
+b1ecb1e8 correct_base_size
+202abd33 heading_tiers
+11f26a58 header_level
+acdd0074 is_list_item
+a1f91997 hanging_number
+9784bdd9 list_marker
+0acdb09d styled_text
+f72dbe3f join_paragraph
+f1ea6914 CAPTION_RE
+c8328707 box_of
+a304ba92 render_blocks
+d5a7e4ae postprocess_fragment
+622593b6 overlap_fraction
+eccff5ef union_box
+79bd14d3 norm_bbox
+569feb68 PDFOCRRequiredError
+dd4c64f8 UnsupportedFileError
+5528f080 PAGE_MARKER
+8955307f load_source
+4e7879c8 _fetch
+d816db1a convert
+35a99978 is_pdf_buffer
+16384e3e PDF_OPTIONS
+f3d66931 _pdf_options
+52941aa0 _parser_opts
+9bede8fc attachment_reader
+ab9f8b59 scrape
+f02a1535 VISION_DOC
+12634071 MIN_PICTURE_PT
+52ffc8dd SCAN_DPI
+72162912 MAX_SIDE_PX
+8c82ff68 CONTEXT_CHARS
+a0fe4751 LEGEND
+75f66bcd CHART_PROMPT
+d9d4c727 PICTURE_PROMPT
+378d58d1 TABLES_PROMPT
+fc354d91 LAYOUT_PROMPT
+11990efb PAGE_PROMPT
+7bb6d736 NUM_RE
+20847b0c WORD_RE
+0cf9ac15 GROUPED_RE
+1d94ce90 ISSUES
+101a2d42 norm_number
+aa0807ca number_tokens
+5d267a64 numbers_in
+db6a296d _keys
+8505ccbd ROW_CELL_MAX_WORDS
+71f9462b _row_labels
+5f5be5ef _label_values
+ffcf6807 check_answer
+927eae4f _upright
+c784404e _ocr_text
+7659d7e7 prepare
+14856fb5 TABLE_BLOCK_RE
+712e45a3 LAYOUT_MAX_NEW_WORDS
+fc3b5933 LAYOUT_MAX_MISSING_WORDS
+aa4bf4ed LAYOUT_MAX_NEW_PAIRS
+f560aeff _words
+2e532797 _pairs
+cdb7a88b word_check
+4cc764b8 _merge_hard
+21fdecd6 PAGE_SPLIT
+2107f7fd _split_pages
+5782f04a merge
+b7686859 summary
+b5ee0cf8 vision_main
+b1a7a5f3 error_text
+99d3aab8 main
+a3f20c3b _fingerprints
+cc642faa verify
+b3a8ba0f refresh
+"""
 
 
 if __name__ == "__main__":
