@@ -81,6 +81,9 @@ install hint without it, because every number is checked against OCR text.
   to cap how many), for when the plain conversion gets those pages wrong.
 - `merge --page-markers` puts `---` and `<!-- page N -->` between pages (none before the first).
 - Plain conversion without the image step: `python scripts/pdf2md.py <input.pdf> -o <output.md>`.
+- Self-check of a plain conversion: add `--check`. It prints one line per page (`page 4: 5 numbers
+  missing, 1 glued word`) and a summary, counts only, never document text. Report every page that
+  is not `OK` to the user word for word.
 - Pieces for search/embeddings: add `--chunks` (JSON output with `data.chunks`; `--chunk-size N`, default 2000).
 
 ## Spreadsheets (xlsx, xlsm, csv)

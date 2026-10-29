@@ -15,6 +15,9 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
   and the vision step (section 12: `pdf2md.py prepare` / `merge` around the agent's vision model for charts, pictures,
   scanned pages; number check against page text/OCR; opt-in `--hard-pages`: text pages with tables/columns, used only
   if numbers and words match the text layer, else rule-based output kept). Tests: `tests/test_vision.py` (OCR checks print SKIP without Tesseract).
+  `--check` (`check_page()` / `check_pdf()`): per-page counts on stderr — numbers missing, merged cells, unlabelled
+  rows, glued words — against the page's own text; never prints document text, so it runs on files that can't leave
+  the office.
 - `chunk2md.py` — `chunk()`: the final markdown cut into pieces for embeddings, for every format (reads markdown
   structure; PDF blocks add pages/bboxes via markdownSpan). Stdlib only, so search code can import it without PDF
   libraries. `scrape(chunk=…)` / `--chunks` load it lazily. Tests: `tests/test_chunk.py`.
@@ -33,12 +36,21 @@ crate (https://github.com/firecrawl/anydoc). Credits in `NOTICE`; terms in `GLOS
 - `tests/make_samples.py` — builds `tests/samples/report.pdf` and `scanned.pdf` (needs reportlab).
 - `tests/fonts.py` — `font()` for drawing synthetic scans (DejaVu on Linux, Arial/Times on macOS).
 - `tests/out/report.md`, `report.json` — expected output for the sample report.
+- `tests/samples/broker_profile.pdf` — synthetic 3-page dashboard export (built by `broker_profile()` in
+  `tests/test_layout.py`, which also tests it).
+- `tasks/pdf_facts.py FILE.pdf [PAGE]` — layout facts of one page without its words (letter gaps, fonts, shapes),
+  safe to paste out of the office.
 
 ## Pipeline (in order)
 1. Page routing per page: text / hybrid (scan + a little native text) / scan / blank. A little native text on a
    plain background image (no ink once the text is painted out, `image_ink`) is text, not hybrid. Document type TextBased / Scanned / ImageBased / Mixed / Empty.
-2. Words → lines (page-relative coordinates via `page.bbox`).
-3. Tables: ruled (`find_tables`, lines strategy) then borderless (text alignment).
+2. Words → lines (page-relative coordinates via `page.bbox`); words glued by the PDF split where the letter gap
+   is > 0.15 × font size (`split_at_gaps`).
+3. Tables: ruled (`find_tables`, lines strategy) then borderless (text alignment). Dashboard pages: a sidebar is
+   its own region, read first and dropped when repeated unchanged (`side_panel`, `drop_repeated_panels`); bold
+   title bands end a table (`on_band`, `split_title_band`); data bars are not charts, their printed % kept
+   (`data_bars`, `join_split_columns`); group labels copied down label columns (`fill_group_labels`); column gaps
+   scale for text < 7.5pt (`col_gap`).
 4. Vector charts detected (filled shapes) and saved as images only — never converted to numbers (tried;
    too unreliable across layouts). With images on, a chart's own text (numeric ticks + short labels) moves into one
    `*Chart labels: …*` line under the image; text that doesn't look like chart labels stays where it is. Side-by-side blocks split into regions (rules that stop at a gutter,
