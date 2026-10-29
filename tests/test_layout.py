@@ -962,6 +962,46 @@ def test_group_label_fill_stops():
     check("group labels: copied down onto rows of signed % and $ values", got[2][0] == "Equity", got)
 
 
+CHECK_BAD_MD = ("| | Rank | $ YTD |\n| --- | --- | --- |\n| Overall | 5 -1 100% | 152,918,094 |\n"
+                "|  | +11% | +22% |\n\nComparesthecurrentyear, BlockRiskTrade(CT), iPhone, McDonald\n")
+CHECK_GOOD_MD = ("| | Rank | Rank.. | %To.. | $ YTD | B/D | WM |\n| --- | --- | --- | --- | --- | --- | --- |\n"
+                 "| Overall | 5 | -1 | 100% | 152,918,094 | +11% | +22% |\n| Total | 6 | 7 | 8 | 9 |  |  |\n\n"
+                 "Compares the current year, Block Risk Trade (CT), iPhone, McDonald "
+                 "![x](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk)\n")
+
+
+def test_check_counts():
+    import pdf2md as P
+    page = {"5", "1", "100", "152918094", "11", "22", "999"}
+    gaps = {("ares", "the"), ("Risk", "Trad"), ("rade", "CT")}
+    got = P.check_page(CHECK_BAD_MD, page, set(), gaps)
+    check("--check: counts a missing number, a merged cell, an unlabelled row, glued words",
+          got == {"missing": 1, "merged": 1, "unlabelled": 1, "glued": 2}, got)
+    got = P.check_page(CHECK_GOOD_MD, page | {"6", "7", "8", "9"}, {"999"}, gaps)
+    check("--check: clean page counts nothing (shown on an earlier page, total row, picture data)",
+          not any(got.values()), got)
+    pdf = broker_profile(os.path.join(OUT, "broker_profile_gaps.pdf"))
+    with P.open_pdf(open(pdf, "rb").read()) as doc:
+        got = P.seen_gaps(doc.pages[0])
+    check("--check: finds gaps between words drawn without spaces", ("ares", "the ") in got, sorted(got)[:8])
+
+
+def test_check_cli():
+    import contextlib
+    import io
+    import pdf2md as P
+    pdf = broker_profile(os.path.join(OUT, "broker_profile_check.pdf"))
+    err = io.StringIO()
+    with contextlib.redirect_stderr(err):
+        P.main([pdf, "-o", os.path.join(OUT, "bp_check.md"), "--images", "none", "--check"])
+    err = err.getvalue()
+    check("--check: the sample's 3 pages are OK", all(f"page {n}: OK" in err for n in (1, 2, 3)), err)
+    check("--check: prints no document text",
+          not any(w in err for w in ("Northwind", "Investment", "Equity", "152,918,094", "Definitions")), err)
+    bad = P.check_lines(P.check_pdf(pdf, {2: CHECK_BAD_MD}))
+    check("--check: a broken page is reported", bad[0].startswith("page 2: ") and "OK" not in bad[0], bad)
+
+
 def test_rotated_scans():
     import pdf2md as P
     if not P.ocr_available():
@@ -990,6 +1030,8 @@ if __name__ == "__main__":
     test_rotated_scans()
     test_broker_profile()
     test_group_label_fill_stops()
+    test_check_counts()
+    test_check_cli()
     test_scorecard("aligned")
     test_scorecard("unaligned", right_row=12.0)
     test_scorecard("path-bars", bars_as_paths=True)
