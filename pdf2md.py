@@ -3125,6 +3125,94 @@ def check_answer(answer: str, source: str):
     return "".join(out), issues, estimated
 
 
+# ---- self-check (--check) ----
+# Each page's markdown against the page's own text layer. Prints counts only, never document text,
+# so a file that can't be shared can still be checked where it lives.
+
+GAP_SEEN_EM = 0.2         # a gap this wide (x font size) between letters is a space a reader sees
+JOIN_KEEP = 4             # letters kept on each side of such a gap to find it in the markdown
+CHECK_SKIP_RE = re.compile(r"\]\([^)]*\)|<!--.*?-->|`[^`\n]*`|\.{3,}")   # link targets, comments, code, dot leaders
+CHECK_ITEMS = (("missing", "number missing", "numbers missing"), ("merged", "merged cell", "merged cells"),
+               ("unlabelled", "unlabelled row", "unlabelled rows"), ("glued", "glued word", "glued words"))
+
+
+def seen_gaps(page) -> set:
+    """{(left, right)}: letters either side of each visible gap inside a run of characters drawn
+    with no space between them, e.g. ('ares', 'the ') for 'Compares the' drawn as one string;
+    a space marks a side that is a whole word (the join must start or end at a word edge)."""
+    out = set()
+    for r in page.extract_words(x_tolerance=3, y_tolerance=2, return_chars=True):
+        cs, pieces = r.get("chars") or [], [""]
+        for a, b in zip([None] + cs, cs):
+            if a and b["x0"] - a["x1"] > GAP_SEEN_EM * float(a.get("size") or 0):
+                pieces.append("")
+            pieces[-1] += b["text"]
+        for p, q in zip(pieces, pieces[1:]):
+            left, right = re.sub(r".*\W", "", p[-JOIN_KEEP:]), re.sub(r"\W.*", "", q[:JOIN_KEEP])
+            if left[-1:].isalpha() and right[:1].isalpha():
+                whole_l = len(left) == len(re.sub(r".*\W", "", p))     # the piece is a whole word:
+                whole_r = len(right) == len(re.sub(r"\W.*", "", q))    # the join starts/ends at a word edge
+                out.add((" " * whole_l + left, right + " " * whole_r))
+    return out
+
+
+def check_page(md: str, page_numbers: set, shown: set, gaps=()) -> dict:
+    """{missing, merged, unlabelled, glued} for one page's markdown. page_numbers: numbers on the
+    page (numbers_in); shown: numbers already in earlier pages' markdown (a repeat left out);
+    gaps: seen_gaps() of the page, glued when the markdown runs the two sides together."""
+    text = CHECK_SKIP_RE.sub(" ", md)
+    lines = text.splitlines()
+    merged = unlabelled = 0
+    for i, line in enumerate(lines):
+        st = line.strip()
+        if not st.startswith("|") or re.fullmatch(r"[|\-:\s]+", st):
+            continue
+        if i + 1 < len(lines) and re.fullmatch(r"\s*\|[|\-:\s]+", lines[i + 1]):
+            continue                                                   # header row
+        cells = [c.strip() for c in st.strip("|").split("|")]
+        merged += sum(1 for c in cells if len(c.split()) >= 2 and all(CELL_NUM_RE.fullmatch(t) for t in c.split()))
+        filled = [c for c in cells if c]
+        if not cells[0] and filled and all(CELL_NUM_RE.fullmatch(c.replace(" ", "")) for c in filled):
+            unlabelled += 1
+    glued = sum(1 for a, b in gaps if re.search(r"(?<![^\W\d_])" * a.startswith(" ") + re.escape(a.strip() + b.strip())
+                                                + r"(?![^\W\d_])" * b.endswith(" "), text))
+    return {"missing": len(page_numbers - numbers_in(text) - shown), "merged": merged,
+            "unlabelled": unlabelled, "glued": glued}
+
+
+def check_pdf(src, pages_md: dict, password: Optional[str] = None) -> list:
+    """[(page number, counts or None)] for {page number: markdown}; None = no text layer to compare.
+    Lines repeated on several pages (running headers, a sidebar) and page numbers aren't counted."""
+    data = src if isinstance(src, (bytes, bytearray)) else open(src, "rb").read()
+    with open_pdf(data, password) as pdf:
+        texts = {n: [l.text for l in group_lines(extract_words(pdf.pages[n - 1], n), n)] for n in sorted(pages_md)}
+        gaps = {n: seen_gaps(pdf.pages[n - 1]) for n in sorted(pages_md)}
+    seen = Counter(t for n in texts for t in set(texts[n]))
+    out, shown = [], set()
+    for n in sorted(pages_md):
+        if not texts[n]:
+            out.append((n, None))
+            continue
+        keep = [t for t in texts[n] if (seen[t] < 2 or len(texts) < 2) and not PAGE_NUM_RE.match(t)]
+        out.append((n, check_page(pages_md[n], numbers_in(CHECK_SKIP_RE.sub(" ", "\n".join(keep))), shown, gaps[n])))
+        shown |= numbers_in(CHECK_SKIP_RE.sub(" ", pages_md[n]))
+    return out
+
+
+def check_lines(results) -> list:
+    """'page N: OK' / 'page N: 3 numbers missing, 1 merged cell' per page, then a summary line."""
+    out = []
+    for n, c in results:
+        if c is None:
+            out.append(f"page {n}: no text layer (scanned), not checked")
+            continue
+        bits = [f"{c[k]} {one if c[k] == 1 else many}" for k, one, many in CHECK_ITEMS if c[k]]
+        out.append(f"page {n}: " + (", ".join(bits) if bits else "OK"))
+    ok = sum(1 for _, c in results if c is not None and not any(c.values()))
+    out.append(f"check: {ok}/{len(results)} pages OK")
+    return out
+
+
 # ---- prepare ----
 
 def _upright(img):
@@ -3508,6 +3596,9 @@ def main(argv=None):
     ap.add_argument("--chunk-size", type=int, metavar="N",
                     help="largest chunk in characters (default 2000); implies --chunks")
     ap.add_argument("--info", action="store_true", help="print detection info to stderr")
+    ap.add_argument("--check", action="store_true",
+                    help="PDFs: per page, count numbers missing, merged cells, unlabelled rows and glued "
+                         "words against the page's text (stderr; counts only, no document text)")
     a = ap.parse_args(argv)
 
     want_chunks = a.chunks or a.chunk_size is not None
@@ -3531,6 +3622,9 @@ def main(argv=None):
                 if flag:
                     opts[key] = True
             parsers = [opts, "image"]
+        if a.check:                                       # per-page markdown to check against
+            parsers = [dict(p, pages=True) if isinstance(p, dict) and p.get("type") == "pdf" else p
+                       for p in parsers]
         resp = scrape(a.input, parsers=parsers, password=a.password, images=a.images,
                       image_dir=image_dir, link_base=out_dir, ocr_lang=a.ocr_lang,
                       page_range=a.page_range, image_dpi=a.image_dpi,
@@ -3546,6 +3640,9 @@ def main(argv=None):
         sys.exit(f"error: {text}")
 
     d = resp["data"]
+    pages_md = {p["pageNumber"]: p["markdown"] for p in d.get("pages") or []}
+    if a.check and not a.pages:
+        d.pop("pages", None)
     if want_json:
         text = json.dumps(resp, ensure_ascii=False, indent=2) + "\n"
     else:
@@ -3557,6 +3654,12 @@ def main(argv=None):
         sys.stdout.write(text)
     if d.get("warning"):
         print(f"warning: {d['warning']}", file=sys.stderr)
+    if a.check:
+        if not pages_md or not os.path.isfile(a.input):
+            print("check: local PDF files only", file=sys.stderr)
+        else:
+            for line in check_lines(check_pdf(a.input, pages_md, a.password)):
+                print(line, file=sys.stderr)
     if a.info or a.output:
         m = d.get("metadata", {})
         if m.get("contentType") in ("application/vnd.ms-outlook", "message/rfc822"):
@@ -3825,6 +3928,14 @@ db6a296d _keys
 71f9462b _row_labels
 5f5be5ef _label_values
 ffcf6807 check_answer
+6e383594 GAP_SEEN_EM
+0d1cddcd JOIN_KEEP
+c5af9013 CHECK_SKIP_RE
+cbd9cf2a CHECK_ITEMS
+309f606f seen_gaps
+0b2d4ec7 check_page
+0d0317cb check_pdf
+c0e7a660 check_lines
 927eae4f _upright
 c784404e _ocr_text
 7659d7e7 prepare
@@ -3842,7 +3953,7 @@ cdb7a88b word_check
 b7686859 summary
 b5ee0cf8 vision_main
 b1a7a5f3 error_text
-99d3aab8 main
+928fd5b8 main
 a3f20c3b _fingerprints
 cc642faa verify
 b3a8ba0f refresh
