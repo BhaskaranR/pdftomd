@@ -74,7 +74,25 @@ python pdf2md.py report.pdf --pages --blocks -o report.json # Firecrawl-style JS
 python pdf2md.py report.pdf --parsers '[{"type":"pdf","mode":"fast","maxPages":5,"pages":true}]'
 python pdf2md.py https://site.com/file.pdf --images embed -o out.md
 python pdf2md.py receipt.jpg                                # image parser (OCR)
+python pdf2md.py report.pdf -o report.md --check            # self-check per page (stderr)
 ```
+
+`--check` compares each page's markdown with the page's own text and prints counts only, never
+document text, so a file that can't be shared can be checked where it is:
+
+```
+page 1: OK
+page 4: 5 numbers missing, 1 glued word
+page 7: 12 merged cells, 3 unlabelled rows
+page 9: no text layer (scanned), not checked
+check: 2/4 pages OK
+```
+
+- numbers missing: on the page, not in the markdown (page numbers, running headers and repeats
+  already shown on an earlier page don't count)
+- merged cells: a table cell holding two or more numbers (`5 -1 100%`)
+- unlabelled rows: a table row of numbers with an empty first cell
+- glued words: letters the page shows with a gap between them, run together in the markdown
 
 ## What it handles
 

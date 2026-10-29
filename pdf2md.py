@@ -51,6 +51,7 @@ import statistics
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.request
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -521,11 +522,31 @@ def page_origin(page) -> tuple:
     return page.bbox[0], page.bbox[1]
 
 
+WORD_GAP_EM = 0.15     # small text: a gap this wide (x font size) between letters is a word break
+
+
+def split_at_gaps(r) -> list:
+    """Dashboard exports draw each word on its own with no space character; at 4-7pt the gap (one
+    space, ~0.28 em) is under the fixed 1.5pt tolerance, so pdfplumber glues the words. Split them."""
+    chars = r.get("chars") or []
+    cuts = [k for k in range(1, len(chars))
+            if chars[k]["x0"] - chars[k - 1]["x1"] > WORD_GAP_EM * max(chars[k]["size"], chars[k - 1]["size"])]
+    if not cuts or not r.get("upright", True):
+        return [r]
+    out = []
+    for a, b in zip([0] + cuts, cuts + [len(chars)]):
+        cs = chars[a:b]
+        txt = "".join(unicodedata.normalize("NFKC", ch["text"]) if "\ufb00" <= ch["text"] <= "\ufb06"
+                      else ch["text"] for ch in cs)
+        out.append(dict(r, text=txt, x0=cs[0]["x0"], x1=cs[-1]["x1"], chars=cs))
+    return out
+
+
 def extract_words(page, pageno) -> list:
     ox, oy = page_origin(page)
-    raw = page.extract_words(
+    raw = [p for r in page.extract_words(
         x_tolerance=1.5, y_tolerance=2, keep_blank_chars=False,
-        use_text_flow=False, extra_attrs=["fontname", "size"])
+        use_text_flow=False, extra_attrs=["fontname", "size"], return_chars=True) for p in split_at_gaps(r)]
     links = [(h["x0"], h["top"], h["x1"], h["bottom"], h.get("uri"))
              for h in (page.hyperlinks or []) if h.get("uri")]
     words = []
@@ -618,11 +639,21 @@ def merge_drop_caps(lines) -> list:
     return out
 
 
+SMALL_TEXT = 7.5   # pt: below this, the gap between table columns scales with the font size
+
+
+def col_gap(size, min_gap=6.0) -> float:
+    """Narrowest gap between two cells: min_gap, or 0.8 em for small text (dashboard exports set 4-7pt
+    text with columns 5-7pt apart; words inside a cell are ~0.28 em apart)."""
+    return min_gap if size >= SMALL_TEXT else max(3.0, 0.8 * size)
+
+
 def segments(line, gap_factor=1.0, min_gap=6.0) -> list:
     """Split a line into horizontally separated cell segments."""
     segs, cur = [], [line.words[0]]
     for prev, w in zip(line.words, line.words[1:]):
-        if w.x0 - prev.x1 > max(gap_factor * max(prev.size, w.size), min_gap):
+        s = max(prev.size, w.size)
+        if w.x0 - prev.x1 > (max(gap_factor * s, min_gap) if s >= SMALL_TEXT else col_gap(s)):
             segs.append(cur)
             cur = []
         cur.append(w)
@@ -741,6 +772,114 @@ def add_interval(merged, a, b, tol=6.0):
     return out
 
 
+PCT_RE = re.compile(r"[-+\u2212]?\d[\d,.]*%")
+
+
+def table_gaps(segs, tol, nrows) -> tuple:
+    """Column gaps of a table's cells. A text cell that alone bridges a gap the other rows leave open
+    (a long label running into the next column) doesn't close it; such cells come back as crossers
+    (ids), to be placed whole in the column they start in."""
+    ivs = [(s[0].x0, s[-1].x1) for s in segs]
+    gaps = column_gaps(ivs, tol)
+    crossers = set()
+    if nrows < 4:
+        return gaps, crossers
+    starts = [a for a, _ in ivs]
+    for k, s in enumerate(segs):
+        a, b = ivs[k]
+        if not s[0].text[:1].isalpha() or not any(a + tol < x < b for x in starts):
+            continue                           # only text running past where another cell starts
+        rest = [iv for m, iv in enumerate(ivs) if m != k and id(segs[m]) not in crossers]
+        g = column_gaps(rest, tol)
+        if len(g) > len(gaps):
+            gaps = g
+            crossers.add(id(s))
+            if len(crossers) >= max(2, nrows // 5):
+                break
+    return gaps, crossers
+
+
+def join_split_columns(rows) -> list:
+    """An in-cell bar column prints its % left of the zero line for a fall and right of it for a rise,
+    and away from its header when every bar rises: neighbouring columns that are never both filled
+    (header row included) and hold only percentages. Join them into one column."""
+    k = 0
+    while rows and k + 1 < len(rows[0]):
+        body = rows[1:]
+        a, b = [r[k] for r in body], [r[k + 1] for r in body]
+        if body and any(a + b) and not any(r[k] and r[k + 1] for r in rows) \
+                and all(PCT_RE.fullmatch(c) for c in a + b if c):
+            rows = [r[:k] + [(r[k] + " " + r[k + 1]).strip()] + r[k + 2:] for r in rows]
+        else:
+            k += 1
+    return rows
+
+
+TOTAL_RE = re.compile(r"(grand\s+)?total\b", re.I)
+
+
+def label_columns(rows) -> int:
+    """How many columns on the left hold labels: those before the first mostly-numeric column."""
+    for k in range(len(rows[0])):
+        body = [r[k] for r in rows[1:] if r[k]]
+        if body and sum(1 for c in body if CELL_NUM_RE.fullmatch(c.replace(" ", ""))) * 2 >= len(body):
+            return k
+    return 0
+
+
+def fill_rows(rows, nlab, last) -> list:
+    """Group labels printed once, blank on the rows under them, copied down. A lower label is
+    copied only while no higher label is printed on the row; a total row keeps its blanks."""
+    out = [rows[0]]
+    for r in rows[1:]:
+        r = list(r)
+        if any(CELL_NUM_RE.fullmatch(c.replace(" ", "")) for c in r[nlab:] if c) \
+                and not any(TOTAL_RE.match(c) for c in r[:nlab] if c):
+            fresh = False
+            for k in range(nlab):
+                fresh = fresh or bool(r[k])
+                if not fresh and last[k]:
+                    r[k] = last[k]
+            last[:] = r[:nlab]
+        elif any(r[:nlab]):
+            last[:] = [""] * nlab              # a label on a row of its own: whose values follow is unclear
+        out.append(r)
+    return out
+
+
+def fill_group_labels(pages_lines):
+    """Fill in group labels in every borderless table; a table that carries on at the top of the next
+    page (same header, starts under a group) takes the labels from the last rows of the page before."""
+    prev = None                                     # (header, last labels) of the previous table
+    for p in sorted(pages_lines):
+        tables = sorted((l for l in pages_lines[p] if l.kind == "table" and l.payload and not l.words == []),
+                        key=lambda l: (l.region, l.top))
+        for t in tables:
+            rows = t.payload
+            nlab = label_columns(rows)
+            if nlab < 1 or len(rows) < 2:
+                prev = None
+                continue
+            last = list(prev[1]) if prev and prev[0] == rows[0] and not rows[1][0] else [""] * nlab
+            t.payload = fill_rows(rows, nlab, last)
+            prev = (rows[0], last)
+
+
+def drop_repeated_panels(pages_lines, page_panels):
+    """A sidebar repeated word for word on later pages is shown once."""
+    shown = None
+    for p in sorted(pages_lines):
+        if p not in page_panels:
+            continue
+        k = page_panels[p]
+        sub = [l for l in pages_lines[p] if l.region == k and l.kind in ("text", "table")]
+        key = "\n".join(l.text if l.kind == "text" else repr(l.payload) for l in sorted(sub, key=lambda l: l.top))
+        if key and key == shown:
+            pages_lines[p] = [l for l in pages_lines[p] if not (l.region == k and l.kind in ("text", "table"))]
+        else:
+            shown = key
+
+
 def header_ruled(first, second, rules) -> bool:
     """A rule between two rows that spans most of them: a table's header rule."""
     lo, hi = min(first.x0, second.x0), max(first.x1, second.x1)
@@ -784,6 +923,28 @@ def runs_on_like_prose(rows_lines, segs_of) -> bool:
     return pairs >= 4 and cont >= PROSE_RUN_ON * pairs and digits < PROSE_MAX_DIGITS
 
 
+def on_band(ln, rules) -> bool:
+    """A bold title on its own shaded band: a rule just above and just below, at least twice as wide
+    as the line (a table's title band spans the table; a header row between rules fills its rules)."""
+    if not ln.words or not ln.words[0].bold:
+        return False
+    pad = 1.5 * max(ln.size, 1)
+    cover = [ry for rx0, rx1, ry in rules if rx0 <= ln.x0 + 1 and rx1 >= ln.x1 - 1
+             and rx1 - rx0 >= 2 * (ln.x1 - ln.x0)]
+    return any(0 <= ln.top - ry <= pad for ry in cover) and any(0 <= ry - ln.bottom <= pad for ry in cover)
+
+
+def split_title_band(ln, rules) -> list:
+    """A table's title band: a bold title and, set apart, a note in italics -> two lines (heading, note).
+    A short band line only; a shaded header row has many cells."""
+    sg = segments(ln)
+    if len(sg) != 2 or not on_band(ln, rules) or not all(w.bold for w in sg[0]) \
+            or not all(w.italic and not w.bold for w in sg[1]):
+        return [ln]
+    return [Line(ln.page, p, p[0].x0, p[-1].x1, min(w.top for w in p), max(w.bottom for w in p))
+            for p in sg]
+
+
 def heuristic_tables(lines, page_width, rules=()) -> list:
     """Text-alignment tables (tables/detect_heuristic.rs, simplified):
     >=3 consecutive rows whose cell segments leave consistent vertical
@@ -799,19 +960,23 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
             seg_cache[k] = segments(ln)
         return seg_cache[k]
 
+    def title_band(ln):
+        return len(segs_of(ln)) <= 2 and on_band(ln, rules)
+
     i, n = 0, len(lines)
     while i < n:
-        if len(segs_of(lines[i])) < 2:
+        if len(segs_of(lines[i])) < 2 or title_band(lines[i]):
             i += 1
             continue
         best_j, best_gaps = None, None
         merged = []
         multi = 0
+        tol = col_gap(lines[i].size)
         for j in range(i, min(n, i + MAX_TABLE_SCAN_ROWS)):
             ln = lines[j]
             if j > i:
                 prev = lines[j - 1]
-                if ln.top - prev.bottom > 2.2 * max(prev.size, 1):
+                if ln.top - prev.bottom > 2.2 * max(prev.size, 1) or title_band(ln):
                     break
             # a header underlined by its own rule after a blank row starts a new table
             if j > i + 1 and rules and j + 1 < n:
@@ -828,7 +993,7 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
                 multi += 1
             trial = merged
             for sg in segs:
-                trial = add_interval(trial, sg[0].x0, sg[-1].x1)
+                trial = add_interval(trial, sg[0].x0, sg[-1].x1, tol)
             if len(trial) < 2:
                 break                      # no vertical gutter survives
             merged = trial
@@ -865,8 +1030,9 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
         if avg_words > 6 or len(rows_lines) < min_rows:
             i += 1
             continue
-        edges = [g[0] + (g[1] - g[0]) / 2 for g in column_gaps(
-            [(s[0].x0, s[-1].x1) for ln in rows_lines for s in segments(ln)], 6.0)]
+        segs_all = [s for ln in rows_lines for s in segs_of(ln)]
+        gaps, crossers = table_gaps(segs_all, tol, len(rows_lines))
+        edges = [g[0] + (g[1] - g[0]) / 2 for g in gaps]
         ncol = len(edges) + 1
         if ncol < 2 or (ncol == 2 and span < page_width * 0.25):
             i += 1
@@ -874,19 +1040,31 @@ def heuristic_tables(lines, page_width, rules=()) -> list:
         rows = []
         for ln in rows_lines:
             row = [[] for _ in range(ncol)]
-            for w in ln.words:
-                cx = (w.x0 + w.x1) / 2
-                k = sum(1 for e in edges if cx > e)
-                row[k].append(w)
+            for sg in segs_of(ln):
+                if id(sg) in crossers:                 # a label running into the next column
+                    k = sum(1 for e in edges if sg[0].x0 > e)
+                    row[k].extend(sg)
+                    continue
+                for w in sg:
+                    cx = (w.x0 + w.x1) / 2
+                    k = sum(1 for e in edges if cx > e)
+                    row[k].append(w)
             rows.append([join_words(c) for c in row])
-        # merge continuation rows: first column empty and only one cell filled
+        # merge continuation rows: first column empty and only one cell filled, or only percentages in
+        # cells the row above left empty (the value printed under an in-cell bar)
         merged = []
         for r in rows:
-            if merged and not r[0] and sum(1 for c in r if c) == 1:
-                k = next(k for k, c in enumerate(r) if c)
-                merged[-1][k] = (merged[-1][k] + " " + r[k]).strip()
+            filled = [k for k, c in enumerate(r) if c]
+            if merged and not r[0] and (len(filled) == 1 or all(
+                    PCT_RE.fullmatch(r[k]) and not merged[-1][k] for k in filled)):
+                for k in filled:
+                    merged[-1][k] = (merged[-1][k] + " " + r[k]).strip()
             else:
                 merged.append(r)
+        merged = join_split_columns(merged)
+        if all(len(c) <= 1 for r in merged for c in r):
+            i = best_j + 1                       # a strip of single letters (month picker), not a table
+            continue
         if len(merged) >= 2:
             out.append((i, best_j - (len(lines[i:best_j + 1]) - len(rows_lines)), merged))
         i = best_j + 1
@@ -1056,6 +1234,29 @@ def one_colour_bars(ms, axes, words) -> bool:
     return False
 
 
+CELL_NUM_RE = re.compile(r"[-+\u2212(]?[$\u20ac\u00a3]?\d[\d,.]*%?\)?")
+
+
+def data_bars(ms, words) -> bool:
+    """In-cell bars of a table (dashboard exports): horizontal bars from one shared zero line, one bar per
+    table row, each row with numbers to its left. The bar only draws a value the row prints; not a chart.
+    (A bar chart's rows are category names, not numbers.)"""
+    edges = Counter(round(v) for m in ms for v in (m["x0"], m["x1"]))
+    zero, n = edges.most_common(1)[0]
+    if n < max(3, 0.8 * len(ms)):
+        return False
+    rows = []
+    for m in ms:
+        if min(abs(m["x0"] - zero), abs(m["x1"] - zero)) > BAR_BASE_TOL + 0.5:
+            return False
+        row = [w for w in words if w.x1 <= min(m["x0"], m["x1"]) and m["top"] <= (w.top + w.bottom) / 2 <= m["bottom"]]
+        if sum(1 for w in row if CELL_NUM_RE.fullmatch(w.text)) < 2:
+            return False
+        rows.append(min(w.top for w in row))
+    return len(set(round(t) for t in rows)) == len(ms)          # one bar per row
+
+
+LABEL_ROW_GAP = 40        # pt: a word this close beyond a label line means the line is a table row
 CHART_LABEL_MAX_WORDS = 3   # chart labels are short: ticks, bar and series names
 CHART_MIN_TICKS = 3         # and an axis has several plain-number ticks
 
@@ -1143,17 +1344,25 @@ def vector_figures(page, words, ox, oy) -> list:
     for ms in clusters.values():
         if len(ms) < 3 or (len({m["ck"] for m in ms}) < 2 and not one_colour_bars(ms, axes, words)):
             continue
+        if data_bars(ms, words):
+            continue
         box = _bbox(ms)
         if (box[2] - box[0]) * (box[3] - box[1]) < 1200:
             continue
         if _cv([m["x1"] - m["x0"] for m in ms]) < 0.05 and _cv([m["bottom"] - m["top"] for m in ms]) < 0.05:
             continue                       # uniform grid of coloured cells: a table, not a chart
         # include the chart's own labels: short text lines right next to the marks
-        near = [w for w in words if box[0] - 90 <= w.x0 and w.x1 <= box[2] + 90
-                and box[1] - 20 <= w.top and w.bottom <= box[3] + 30]
-        for ln in group_lines(near, 0):
-            if len(ln.words) <= 6:
-                box = _union(box, (ln.x0, ln.top, ln.x1, ln.bottom))
+        x0, x1 = box[0] - 90, box[2] + 90
+        band = [w for w in words if box[1] - 20 <= w.top and w.bottom <= box[3] + 30]
+        for ln in group_lines(band, 0):
+            inside = [w for w in ln.words if x0 <= w.x0 and w.x1 <= x1]
+            if not inside or len(inside) > 6:
+                continue
+            ix0, ix1 = min(w.x0 for w in inside), max(w.x1 for w in inside)
+            if any(w not in inside and (ix0 - LABEL_ROW_GAP < w.x1 <= ix0 or ix1 <= w.x0 < ix1 + LABEL_ROW_GAP)
+                   for w in ln.words):
+                continue                   # the line carries on outside: a table row, not a label
+            box = _union(box, (ix0, min(w.top for w in inside), ix1, max(w.bottom for w in inside)))
         figs.append({"bbox": box})
     return figs
 
@@ -1280,6 +1489,27 @@ def ocr_image(img, lang="eng", k=1.0, unrotate=None) -> Optional[list]:
 
 
 # ----------------------------- 6. layout / reading order ------------------
+
+SIDE_PANEL_MIN_H = 0.4    # a sidebar's background runs most of the page down
+SIDE_PANEL_MAX_W = 0.35   # and is narrow
+
+
+def side_panel(page, words, ox, oy):
+    """A sidebar: a tall, narrow, coloured rectangle at the side of the page with text on it
+    (dashboard exports: title, filters, definitions). Its box, page-relative, or None."""
+    W, H = page.width, page.height
+    for o in page.rects:
+        s = _shape(o, ox, oy)
+        w_, h_ = s["x1"] - s["x0"], s["bottom"] - s["top"]
+        if not s["fill"] or whiteish(s["fc"]) or h_ < SIDE_PANEL_MIN_H * H or not 40 <= w_ <= SIDE_PANEL_MAX_W * W:
+            continue
+        if s["x0"] > 0.15 * W and s["x1"] < 0.85 * W:
+            continue                           # not at a side
+        box = (s["x0"], s["top"], s["x1"], s["bottom"])
+        if sum(1 for w in words if center_inside((w.x0, w.top, w.x1, w.bottom), box)) >= 5:
+            return box
+    return None
+
 
 def segment_regions(words, rules, obstacles, box, depth=0) -> list:
     """Split a page area into reading-order regions where independent blocks sit
@@ -2126,7 +2356,7 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
         if max_pages:
             idx = idx[:max_pages]
         stats = []
-        pages_lines, heights, widths, page_regions = {}, {}, {}, {}
+        pages_lines, heights, widths, page_regions, page_panels = {}, {}, {}, {}, {}
         all_images = []
         complex_layout = False
 
@@ -2222,7 +2452,16 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                             items.append(Line(pageno, [], fb[0], fb[2], fb[1], fb[3], "image", ref))
                 # side-by-side blocks: split the page into regions, read each on its own
                 obstacles = chart_boxes + [box_of(it) for it in items if it.kind == "image"]
-                regions = segment_regions(words, rules, obstacles, full) if layout else [full]
+                panel = side_panel(page, words, ox, oy) if layout else None
+                if panel:                   # a sidebar is read on its own, first
+                    rest = (panel[2], 0.0, page.width, page.height) if panel[0] < page.width / 2 \
+                        else (0.0, 0.0, panel[0], page.height)
+                    regions = [panel] + segment_regions(
+                        [w for w in words if center_inside((w.x0, w.top, w.x1, w.bottom), rest)],
+                        [r for r in rules if rest[0] - 1 <= r[0] and r[1] <= rest[2] + 1], obstacles, rest)
+                    page_panels[pageno] = 0
+                else:
+                    regions = segment_regions(words, rules, obstacles, full) if layout else [full]
                 page_regions[pageno] = regions
                 multi_region = len(regions) > 1
                 for it in items:
@@ -2240,6 +2479,8 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                             rpage = None
                     # tables (ruled first, then heuristic on the remaining text)
                     for bbox, rows, cols in (ruled_tables(rpage, (ox, oy)) if rpage is not None else []):
+                        if all(len((c or "").strip()) <= 1 for r in rows for c in r):
+                            continue                # a ruled strip of single letters (month picker)
                         rows, head = table_header_above(bbox, rows, cols, rw)
                         hid = {id(w) for w in head}
                         tb = (bbox[0], min([bbox[1]] + [w.top for w in head]), bbox[2], bbox[3])
@@ -2249,9 +2490,9 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
                         rw = [w for w in rw if id(w) not in tids]
                         items.append(Line(pageno, tw, tb[0], tb[2], tb[1], tb[3], "table", rows,
                                           region=k))
-                    lines = group_lines(rw, pageno)
                     rrules = [r for r in rules if rb[0] - 1 <= r[0] and r[1] <= rb[2] + 1
                               and rb[1] <= r[2] <= rb[3]] if multi_region else rules
+                    lines = [p for l in group_lines(rw, pageno) for p in split_title_band(l, rrules)]
                     for a_, b_, rows in heuristic_tables(lines, rb[2] - rb[0], rrules):
                         tl = lines[a_:b_ + 1]
                         items.append(Line(pageno, [w for l in tl for w in l.words],
@@ -2269,7 +2510,15 @@ def convert(src, mode: str = "auto", max_pages: Optional[int] = None,
         pdf_type, confidence, needs_ocr = classify(stats)
         if mode == "fast" and pdf_type in ("Scanned", "ImageBased"):
             raise PDFOCRRequiredError(pdf_type)
-        pages_lines, furniture = strip_furniture(pages_lines, heights)
+        # a sidebar's repeats are dropped whole (below), not line by line as running headers
+        held = {p: [l for l in ls if p in page_panels and l.region == page_panels[p]]
+                for p, ls in pages_lines.items()}
+        pages_lines, furniture = strip_furniture(
+            {p: [l for l in ls if l not in held[p]] for p, ls in pages_lines.items()}, heights)
+        for p in pages_lines:
+            pages_lines[p] = held.get(p, []) + pages_lines[p]
+        drop_repeated_panels(pages_lines, page_panels)
+        fill_group_labels(pages_lines)
 
         all_lines = [l for ls in pages_lines.values() for l in ls if l.kind == "text"]
         base = correct_base_size(all_lines, body_font_size(all_lines))
@@ -2876,6 +3125,94 @@ def check_answer(answer: str, source: str):
     return "".join(out), issues, estimated
 
 
+# ---- self-check (--check) ----
+# Each page's markdown against the page's own text layer. Prints counts only, never document text,
+# so a file that can't be shared can still be checked where it lives.
+
+GAP_SEEN_EM = 0.2         # a gap this wide (x font size) between letters is a space a reader sees
+JOIN_KEEP = 4             # letters kept on each side of such a gap to find it in the markdown
+CHECK_SKIP_RE = re.compile(r"\]\([^)]*\)|<!--.*?-->|`[^`\n]*`|\.{3,}")   # link targets, comments, code, dot leaders
+CHECK_ITEMS = (("missing", "number missing", "numbers missing"), ("merged", "merged cell", "merged cells"),
+               ("unlabelled", "unlabelled row", "unlabelled rows"), ("glued", "glued word", "glued words"))
+
+
+def seen_gaps(page) -> set:
+    """{(left, right)}: letters either side of each visible gap inside a run of characters drawn
+    with no space between them, e.g. ('ares', 'the ') for 'Compares the' drawn as one string;
+    a space marks a side that is a whole word (the join must start or end at a word edge)."""
+    out = set()
+    for r in page.extract_words(x_tolerance=3, y_tolerance=2, return_chars=True):
+        cs, pieces = r.get("chars") or [], [""]
+        for a, b in zip([None] + cs, cs):
+            if a and b["x0"] - a["x1"] > GAP_SEEN_EM * float(a.get("size") or 0):
+                pieces.append("")
+            pieces[-1] += b["text"]
+        for p, q in zip(pieces, pieces[1:]):
+            left, right = re.sub(r".*\W", "", p[-JOIN_KEEP:]), re.sub(r"\W.*", "", q[:JOIN_KEEP])
+            if left[-1:].isalpha() and right[:1].isalpha():
+                whole_l = len(left) == len(re.sub(r".*\W", "", p))     # the piece is a whole word:
+                whole_r = len(right) == len(re.sub(r"\W.*", "", q))    # the join starts/ends at a word edge
+                out.add((" " * whole_l + left, right + " " * whole_r))
+    return out
+
+
+def check_page(md: str, page_numbers: set, shown: set, gaps=()) -> dict:
+    """{missing, merged, unlabelled, glued} for one page's markdown. page_numbers: numbers on the
+    page (numbers_in); shown: numbers already in earlier pages' markdown (a repeat left out);
+    gaps: seen_gaps() of the page, glued when the markdown runs the two sides together."""
+    text = CHECK_SKIP_RE.sub(" ", md)
+    lines = text.splitlines()
+    merged = unlabelled = 0
+    for i, line in enumerate(lines):
+        st = line.strip()
+        if not st.startswith("|") or re.fullmatch(r"[|\-:\s]+", st):
+            continue
+        if i + 1 < len(lines) and re.fullmatch(r"\s*\|[|\-:\s]+", lines[i + 1]):
+            continue                                                   # header row
+        cells = [c.strip() for c in st.strip("|").split("|")]
+        merged += sum(1 for c in cells if len(c.split()) >= 2 and all(CELL_NUM_RE.fullmatch(t) for t in c.split()))
+        filled = [c for c in cells if c]
+        if not cells[0] and filled and all(CELL_NUM_RE.fullmatch(c.replace(" ", "")) for c in filled):
+            unlabelled += 1
+    glued = sum(1 for a, b in gaps if re.search(r"(?<![^\W\d_])" * a.startswith(" ") + re.escape(a.strip() + b.strip())
+                                                + r"(?![^\W\d_])" * b.endswith(" "), text))
+    return {"missing": len(page_numbers - numbers_in(text) - shown), "merged": merged,
+            "unlabelled": unlabelled, "glued": glued}
+
+
+def check_pdf(src, pages_md: dict, password: Optional[str] = None) -> list:
+    """[(page number, counts or None)] for {page number: markdown}; None = no text layer to compare.
+    Lines repeated on several pages (running headers, a sidebar) and page numbers aren't counted."""
+    data = src if isinstance(src, (bytes, bytearray)) else open(src, "rb").read()
+    with open_pdf(data, password) as pdf:
+        texts = {n: [l.text for l in group_lines(extract_words(pdf.pages[n - 1], n), n)] for n in sorted(pages_md)}
+        gaps = {n: seen_gaps(pdf.pages[n - 1]) for n in sorted(pages_md)}
+    seen = Counter(t for n in texts for t in set(texts[n]))
+    out, shown = [], set()
+    for n in sorted(pages_md):
+        if not texts[n]:
+            out.append((n, None))
+            continue
+        keep = [t for t in texts[n] if (seen[t] < 2 or len(texts) < 2) and not PAGE_NUM_RE.match(t)]
+        out.append((n, check_page(pages_md[n], numbers_in(CHECK_SKIP_RE.sub(" ", "\n".join(keep))), shown, gaps[n])))
+        shown |= numbers_in(CHECK_SKIP_RE.sub(" ", pages_md[n]))
+    return out
+
+
+def check_lines(results) -> list:
+    """'page N: OK' / 'page N: 3 numbers missing, 1 merged cell' per page, then a summary line."""
+    out = []
+    for n, c in results:
+        if c is None:
+            out.append(f"page {n}: no text layer (scanned), not checked")
+            continue
+        bits = [f"{c[k]} {one if c[k] == 1 else many}" for k, one, many in CHECK_ITEMS if c[k]]
+        out.append(f"page {n}: " + (", ".join(bits) if bits else "OK"))
+    ok = sum(1 for _, c in results if c is not None and not any(c.values()))
+    out.append(f"check: {ok}/{len(results)} pages OK")
+    return out
+
+
 # ---- prepare ----
 
 def _upright(img):
@@ -3259,6 +3596,9 @@ def main(argv=None):
     ap.add_argument("--chunk-size", type=int, metavar="N",
                     help="largest chunk in characters (default 2000); implies --chunks")
     ap.add_argument("--info", action="store_true", help="print detection info to stderr")
+    ap.add_argument("--check", action="store_true",
+                    help="PDFs: per page, count numbers missing, merged cells, unlabelled rows and glued "
+                         "words against the page's text (stderr; counts only, no document text)")
     a = ap.parse_args(argv)
 
     want_chunks = a.chunks or a.chunk_size is not None
@@ -3282,6 +3622,9 @@ def main(argv=None):
                 if flag:
                     opts[key] = True
             parsers = [opts, "image"]
+        if a.check:                                       # per-page markdown to check against
+            parsers = [dict(p, pages=True) if isinstance(p, dict) and p.get("type") == "pdf" else p
+                       for p in parsers]
         resp = scrape(a.input, parsers=parsers, password=a.password, images=a.images,
                       image_dir=image_dir, link_base=out_dir, ocr_lang=a.ocr_lang,
                       page_range=a.page_range, image_dpi=a.image_dpi,
@@ -3297,6 +3640,9 @@ def main(argv=None):
         sys.exit(f"error: {text}")
 
     d = resp["data"]
+    pages_md = {p["pageNumber"]: p["markdown"] for p in d.get("pages") or []}
+    if a.check and not a.pages:
+        d.pop("pages", None)
     if want_json:
         text = json.dumps(resp, ensure_ascii=False, indent=2) + "\n"
     else:
@@ -3308,6 +3654,12 @@ def main(argv=None):
         sys.stdout.write(text)
     if d.get("warning"):
         print(f"warning: {d['warning']}", file=sys.stderr)
+    if a.check:
+        if not pages_md or not os.path.isfile(a.input):
+            print("check: local PDF files only", file=sys.stderr)
+        else:
+            for line in check_lines(check_pdf(a.input, pages_md, a.password)):
+                print(line, file=sys.stderr)
     if a.info or a.output:
         m = d.get("metadata", {})
         if m.get("contentType") in ("application/vnd.ms-outlook", "message/rfc822"):
@@ -3450,20 +3802,34 @@ f320ed33 _clean_private_use
 a5f1ae68 _fix_symbol_font
 7b9818dd open_pdf
 b26df565 page_origin
-b49fbfed extract_words
+e839513a WORD_GAP_EM
+b53ba5f4 split_at_gaps
+9a66aee9 extract_words
 ca40bc33 group_lines
 44c11210 merge_drop_caps
-fcf04328 segments
+f4e4f757 SMALL_TEXT
+e7399799 col_gap
+e86f6edf segments
 a1182959 ruled_tables
 c9dc9119 table_header_above
 bb2d635e column_gaps
 164b1936 MAX_TABLE_SCAN_ROWS
 cc104ce8 add_interval
+3ebf190c PCT_RE
+588e876b table_gaps
+8cee3927 join_split_columns
+82d6a02a TOTAL_RE
+2368a912 label_columns
+7b29d3d6 fill_rows
+fa7ca7c2 fill_group_labels
+885283f8 drop_repeated_panels
 cd1a1d68 header_ruled
 20a6cea1 PROSE_RUN_ON
 354a5b1f PROSE_MAX_DIGITS
 14c4da6c runs_on_like_prose
-7c0a91bb heuristic_tables
+008c9620 on_band
+413b45a8 split_title_band
+177391f6 heuristic_tables
 2b42393b page_images
 3070c80e render_region
 4202ef54 save_image
@@ -3480,16 +3846,22 @@ d6d51ee2 _bbox
 63fa2cb7 BAR_BASE_TOL
 6cca5053 BAR_LEN_CV
 251cdb54 one_colour_bars
+b734f14c CELL_NUM_RE
+e43cfa2e data_bars
+780f7acd LABEL_ROW_GAP
 69a2fb9e CHART_LABEL_MAX_WORDS
 d20c207f CHART_MIN_TICKS
 284aad42 chart_labels
-eee12ad6 vector_figures
+2e21101c vector_figures
 d924216f _OCR_WARNED
 9a508bc9 ocr_blocks
 d17fc54d detect_rotation
 b504d738 ocr_available
 aa26e7d7 flatten_alpha
 2a5fda60 ocr_image
+112a92c0 SIDE_PANEL_MIN_H
+87c6922b SIDE_PANEL_MAX_W
+d69a50cc side_panel
 e7e65bb9 segment_regions
 d6bec067 rule_spans_columns
 25954202 region_of
@@ -3526,7 +3898,7 @@ dd4c64f8 UnsupportedFileError
 5528f080 PAGE_MARKER
 8955307f load_source
 4e7879c8 _fetch
-d816db1a convert
+00389eed convert
 35a99978 is_pdf_buffer
 16384e3e PDF_OPTIONS
 f3d66931 _pdf_options
@@ -3556,6 +3928,14 @@ db6a296d _keys
 71f9462b _row_labels
 5f5be5ef _label_values
 ffcf6807 check_answer
+6e383594 GAP_SEEN_EM
+0d1cddcd JOIN_KEEP
+c5af9013 CHECK_SKIP_RE
+cbd9cf2a CHECK_ITEMS
+309f606f seen_gaps
+0b2d4ec7 check_page
+0d0317cb check_pdf
+c0e7a660 check_lines
 927eae4f _upright
 c784404e _ocr_text
 7659d7e7 prepare
@@ -3573,7 +3953,7 @@ cdb7a88b word_check
 b7686859 summary
 b5ee0cf8 vision_main
 b1a7a5f3 error_text
-99d3aab8 main
+928fd5b8 main
 a3f20c3b _fingerprints
 cc642faa verify
 b3a8ba0f refresh
