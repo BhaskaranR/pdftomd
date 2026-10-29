@@ -956,6 +956,10 @@ def test_group_label_fill_stops():
     got = P.fill_rows(rows, 2, ["", ""])
     check("group labels: copied down, but a total row keeps its blanks",
           got[2][0] == "Equity" and got[3][0] == "", got)
+    rows = [["", "Chg", "Share"], ["Equity", "+5%", "$1,200"], ["", "-3%", "$900"]]
+    check("group labels: signed %, $ cells count as numbers", P.label_columns(rows) == 1, P.label_columns(rows))
+    got = P.fill_rows(rows, 1, [""])
+    check("group labels: copied down onto rows of signed % and $ values", got[2][0] == "Equity", got)
 
 
 def test_rotated_scans():

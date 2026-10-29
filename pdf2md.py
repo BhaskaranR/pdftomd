@@ -822,7 +822,7 @@ def label_columns(rows) -> int:
     """How many columns on the left hold labels: those before the first mostly-numeric column."""
     for k in range(len(rows[0])):
         body = [r[k] for r in rows[1:] if r[k]]
-        if body and sum(1 for c in body if NUM_RE.fullmatch(c.replace(" ", ""))) * 2 >= len(body):
+        if body and sum(1 for c in body if CELL_NUM_RE.fullmatch(c.replace(" ", ""))) * 2 >= len(body):
             return k
     return 0
 
@@ -833,7 +833,7 @@ def fill_rows(rows, nlab, last) -> list:
     out = [rows[0]]
     for r in rows[1:]:
         r = list(r)
-        if any(NUM_RE.fullmatch(c.replace(" ", "")) for c in r[nlab:] if c) \
+        if any(CELL_NUM_RE.fullmatch(c.replace(" ", "")) for c in r[nlab:] if c) \
                 and not any(TOTAL_RE.match(c) for c in r[:nlab] if c):
             fresh = False
             for k in range(nlab):
@@ -1234,7 +1234,7 @@ def one_colour_bars(ms, axes, words) -> bool:
     return False
 
 
-NUM_RE = re.compile(r"[-+\u2212(]?[$\u20ac\u00a3]?\d[\d,.]*%?\)?")
+CELL_NUM_RE = re.compile(r"[-+\u2212(]?[$\u20ac\u00a3]?\d[\d,.]*%?\)?")
 
 
 def data_bars(ms, words) -> bool:
@@ -1250,7 +1250,7 @@ def data_bars(ms, words) -> bool:
         if min(abs(m["x0"] - zero), abs(m["x1"] - zero)) > BAR_BASE_TOL + 0.5:
             return False
         row = [w for w in words if w.x1 <= min(m["x0"], m["x1"]) and m["top"] <= (w.top + w.bottom) / 2 <= m["bottom"]]
-        if sum(1 for w in row if NUM_RE.fullmatch(w.text)) < 2:
+        if sum(1 for w in row if CELL_NUM_RE.fullmatch(w.text)) < 2:
             return False
         rows.append(min(w.top for w in row))
     return len(set(round(t) for t in rows)) == len(ms)          # one bar per row
@@ -3716,8 +3716,8 @@ cc104ce8 add_interval
 588e876b table_gaps
 8cee3927 join_split_columns
 82d6a02a TOTAL_RE
-b6951679 label_columns
-7bb14a1a fill_rows
+2368a912 label_columns
+7b29d3d6 fill_rows
 fa7ca7c2 fill_group_labels
 885283f8 drop_repeated_panels
 cd1a1d68 header_ruled
@@ -3743,8 +3743,8 @@ d6d51ee2 _bbox
 63fa2cb7 BAR_BASE_TOL
 6cca5053 BAR_LEN_CV
 251cdb54 one_colour_bars
-3a9bfadc NUM_RE
-ec766b2b data_bars
+b734f14c CELL_NUM_RE
+e43cfa2e data_bars
 780f7acd LABEL_ROW_GAP
 69a2fb9e CHART_LABEL_MAX_WORDS
 d20c207f CHART_MIN_TICKS

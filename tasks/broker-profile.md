@@ -32,4 +32,7 @@ Corpus changes (old main vs new):
 - fixed on the way: 3 crashes (None cells in ruled tables), 3 tables broken by over-eager title bands,
   a wrong group label copied into another department's row
 - encrypted-secret123 fails old and new (needs a password; open work #7)
+- fixed after review: the cell-number pattern was named NUM_RE, which the vision section redefines, so
+  group labels and data bars used a pattern without %, + or $; renamed CELL_NUM_RE (bits_pilani: row
+  numbers like `14.` no longer copied down as labels)
 Not done: sidebar shown again only if it changes is by exact text; `ﬁ` loss needs the office facts output.
